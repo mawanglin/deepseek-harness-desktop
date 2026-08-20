@@ -1,0 +1,39 @@
+# Agent Note: Linux packaging (deb/rpm/AppImage) and release publishing
+
+Status: proposed
+
+English | [中文](2026-08-21-linux-packaging-and-release.zh.md)
+
+## Problem
+
+CI only produces packaged smoke artifacts for Windows and macOS. `desktop-windows` builds an unsigned NSIS installer and a portable archive on `windows-latest`; `desktop-macos` builds an unsigned universal DMG on `macos-latest` to catch packaging regressions before a manual signed release. `dsh-plugin-desktop`'s `build.linux.target` in `package.json` is `["dir"]`, an unpacked-directory placeholder that `package-dir.mjs` already relies on for the host-agnostic `--dir` verification build used by `yarn check`. No workflow builds a `.deb`, `.rpm`, or AppImage, and nothing publishes any desktop artifact to a location a user can download from inside this repository: the existing "release" is only the `release-mac.ts` local signed build plus a manually updated Redis key that the `dshdesktop.cn` version-check service reads. That service, and the desktop in-app update checker that queries it, are explicitly Windows/macOS-only today (see [Desktop release discovery and terminal environment](2026-08-15-desktop-release-discovery-and-terminal.md)); Linux "retains compatibility but has neither an installer-download path nor a desktop terminal until separate platform designs are implemented."
+
+## Decision
+
+Linux packaging follows the same CI-smoke-then-manual-or-tag-triggered-release shape already established for Windows and macOS, scoped strictly to what this repository can own: GitHub Actions and GitHub Releases. It does not touch `dshdesktop.cn` or the in-app update checker; that integration remains a separate, future platform design.
+
+**Electron Builder configuration.** `dsh-plugin-desktop/package.json`'s `build.linux.target` changes from `["dir"]` to a list producing `deb`, `rpm`, and `AppImage`, x64 only (matching the existing Windows `x64`-only scope). `package-dir.mjs` calls `electron-builder --dir`, which overrides any configured target with `dir` for the current host platform, so this change does not affect the existing `yarn check` verification build.
+
+**Packaging and verification scripts.** New `scripts/package-linux.ts` mirrors the injectable-boundary shape of `package-win.ts`: an options object carrying `env`, `platform`, `run`, `log`, and so on, so it stays unit-testable without invoking Electron Builder. Unlike the Windows and macOS scripts, it does not need to strip signing secrets — Linux package formats have no code-signing step in this design. It invokes `electron-builder --linux deb rpm AppImage --x64 --publish never`. A new `scripts/verify-linux-packages.ts` mirrors `verify-win-installer.ts`'s pure-byte-header verification style rather than mounting or executing the artifacts (which would need `libfuse2` for AppImage in CI): it checks the `.deb` for the `ar` archive magic `!<arch>\n`, the `.rpm` for the RPM lead magic `ED AB EE DB`, and the `.AppImage` for an ELF header plus the AppImage type-2 magic at offset 8. `package.json` gains `check:linux-package` (mirroring `check:win-package`'s targeted spec list) and `dist:linux` scripts.
+
+**CI smoke job.** `ci.yml` gains a `desktop-linux` job alongside `desktop-windows` and `desktop-macos`, gated by the same `needs.changes.outputs.product == 'true'` condition, running on `ubuntu-latest`. It installs `rpm` via `apt-get` (the one packaging tool missing from the runner image; `dpkg-deb` and `fakeroot` are already present), runs the shared `yarn check` gate, then `yarn workspace dsh-plugin-desktop dist:linux` with `DSH_PACKAGE_CHECK_ALREADY_RAN=1` to skip the redundant preflight, matching the Windows and macOS jobs. It builds and verifies only; it does not publish anything, and the workflow's top-level `contents: read` permission is untouched.
+
+**Release publishing.** A new workflow file, `release-linux.yml`, triggers on `push: tags: ['v*']`, matching the repository's existing `vMAJOR.MINOR.PATCH` tag convention. It declares `permissions: contents: write` on that workflow only, leaving `ci.yml` at `contents: read`. It runs a full `yarn check` (there is no shared gate job to reuse across workflow files, matching how `release-mac.ts` runs `yarn run check` itself before a manual release), packages and verifies the three Linux artifacts, then creates a **draft** GitHub Release for the pushed tag if one does not already exist (`gh release create --draft`) and uploads the three artifacts to it (`gh release upload`). Draft status keeps a maintainer in the loop before the artifacts become publicly visible, using the default `GITHUB_TOKEN` with no new secrets.
+
+## Alternatives considered
+
+**Fold the release job into `ci.yml`.** Rejected: `ci.yml`'s `changes`/`check` gating is built around PR and push-to-master diffing, not tag pushes, and mixing a `contents: write` release path into a workflow that otherwise only needs `contents: read` widens that workflow's blast radius for no benefit. A separate file keeps the elevated permission scoped to exactly the job that needs it.
+
+**Split `deb`, `rpm`, and `AppImage` into three separate jobs**, mirroring the two Windows jobs. Rejected per explicit direction: Electron Builder already produces all three targets from one `--linux deb rpm AppImage` invocation reusing the same packaged app tree, so three jobs would only triple dependency-install and build time for no isolation benefit — the three targets do not have independent failure domains the way installer vs. portable packaging do on Windows.
+
+**Verify the AppImage by mounting or executing it.** Rejected in favor of a byte-header check. Executing an AppImage needs `libfuse2` or the `--appimage-extract-and-run` fallback, an extra CI dependency and a heavier check than the existing Windows PE header / macOS DMG `koly` trailer verifications this design otherwise mirrors.
+
+**Auto-publish a non-draft Release on tag push.** Rejected per explicit direction in favor of `--draft`, so a maintainer confirms before the artifacts are publicly downloadable, consistent with the manual confirmation step the existing macOS/Windows release process already has (a human runs `release-mac.ts` by hand).
+
+## Consequences
+
+Linux users get installable `.deb`, `.rpm`, and AppImage artifacts attached to a draft GitHub Release whenever a maintainer pushes a `v*` tag and then publishes the draft; they do not get in-app update notifications or a one-click download inside DSH Desktop, since that remains gated on the separate `dshdesktop.cn` platform-design gap noted above. CI gains one more `ubuntu-latest` job per PR/push touching product code, adding Electron Builder's Linux packaging time to the pipeline. `release-linux.yml` is the first workflow in this repository with `contents: write`, and the first path that uploads a desktop-product asset outside a maintainer's own machine; it is scoped to a single job and a single narrow permission to keep that new capability easy to audit.
+
+## Verification
+
+`package-linux.ts` and `verify-linux-packages.ts` follow the existing dependency-injection test pattern (`package-win.spec.ts`'s style): unit tests exercise the injected `run`/`log` boundary and the magic-byte checks without invoking a real Electron Builder build. The `desktop-linux` CI job is the packaging-regression smoke check, matching `desktop-windows`/`desktop-macos`; a real installability check (installing the `.deb` with `apt`, the `.rpm` with `dnf`/`rpm`, or running the AppImage) is out of scope for this design, the same way the existing Windows/macOS jobs do not launch the packaged application either.
