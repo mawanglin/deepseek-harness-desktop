@@ -499,6 +499,10 @@ describe('published package surface', () => {
     )
     const macosJob = ciWorkflow.slice(
       ciWorkflow.indexOf('  desktop-macos:'),
+      ciWorkflow.indexOf('  desktop-linux:'),
+    )
+    const linuxJob = ciWorkflow.slice(
+      ciWorkflow.indexOf('  desktop-linux:'),
       ciWorkflow.indexOf('  upstream-command-windows:'),
     )
 
@@ -511,6 +515,11 @@ describe('published package surface', () => {
     expect(macosJob).toContain('run: yarn workspace dsh-plugin-desktop dist:mac-smoke')
     expect(macosJob).toContain('DSH_PACKAGE_CHECK_ALREADY_RAN: \'1\'')
     expect(macosJob).not.toContain('- run: yarn dist:mac-smoke')
+    expect(linuxJob).toContain('runs-on: ubuntu-latest')
+    expect(linuxJob).toContain('apt-get install -y rpm')
+    expect(linuxJob).toContain('- run: yarn check')
+    expect(linuxJob).toContain('run: yarn workspace dsh-plugin-desktop dist:linux')
+    expect(linuxJob).toContain('DSH_PACKAGE_CHECK_ALREADY_RAN: \'1\'')
   })
 
   it('skips product packaging only for documentation-only changes', () => {
