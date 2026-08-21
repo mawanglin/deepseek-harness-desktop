@@ -341,7 +341,7 @@
       ],
       "artifactName": "DSH-Desktop-${version}-x64.${ext}",
       "icon": "build/app-icon.png",
-      "maintainer": "Anywhere Labs <Cob@88.com>"
+      "maintainer": "Anywhere Labs <cob@88.com>"
     }
   }
 }
