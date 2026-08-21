@@ -41,6 +41,15 @@ describe('Linux release workflow', () => {
     expect(packageStep?.env?.DSH_PACKAGE_CHECK_ALREADY_RAN).toBe('1')
   })
 
+  it('verifies the pushed tag matches the packaged version before publishing', () => {
+    const job = workflow.jobs?.['release-linux']
+    const verifyStep = job?.steps?.find(
+      step => step.name === 'Verify the tag matches the packaged version',
+    )
+    expect(verifyStep).toBeDefined()
+    expect(verifyStep?.run).toContain('tag" = "v$version"')
+  })
+
   it('creates a draft release only when missing, then uploads all three artifacts', () => {
     const job = workflow.jobs?.['release-linux']
     const publishStep = job?.steps?.find(
