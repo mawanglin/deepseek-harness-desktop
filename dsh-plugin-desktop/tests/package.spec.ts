@@ -35,7 +35,7 @@ const manifest = JSON.parse(readFileSync(new URL('package.json', packageRoot), '
     win?: { icon?: unknown; target?: unknown; artifactName?: unknown }
     nsis?: Record<string, unknown>
     portable?: Record<string, unknown>
-    linux?: { icon?: unknown }
+    linux?: { target?: unknown; artifactName?: unknown; icon?: unknown }
   }
   dependencies?: Record<string, unknown>
   optionalDependencies?: Record<string, unknown>
@@ -432,6 +432,12 @@ describe('published package surface', () => {
       useZip: true,
       artifactName: 'DSH-Desktop-${version}-${arch}-Setup.${ext}',
     })
+    expect(manifest.build?.linux?.target).toEqual([
+      { target: 'deb', arch: ['x64'] },
+      { target: 'rpm', arch: ['x64'] },
+      { target: 'AppImage', arch: ['x64'] },
+    ])
+    expect(manifest.build?.linux?.artifactName).toBe('DSH-Desktop-${version}-${arch}.${ext}')
     expect(manifest.build?.linux?.icon).toBe('build/app-icon.png')
   })
 
@@ -454,6 +460,13 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['check:win-package']).toContain('tests/windows-volume-diagnostics.spec.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run verify:closure')
     expect(manifest.scripts?.['check:mac-package']).toBe('yarn run -T check')
+    expect(manifest.scripts?.['dist:linux']).toBe('node scripts/package-linux.ts')
+    expect(manifest.scripts?.['check:linux-package']).toContain('yarn run build')
+    expect(manifest.scripts?.['check:linux-package']).toContain('yarn run typecheck')
+    expect(manifest.scripts?.['check:linux-package']).toContain('tests/package.spec.ts')
+    expect(manifest.scripts?.['check:linux-package']).toContain('tests/verify-linux-packages.spec.ts')
+    expect(manifest.scripts?.['check:linux-package']).toContain('tests/release-linux-workflow.spec.ts')
+    expect(manifest.scripts?.['check:linux-package']).toContain('yarn run verify:closure')
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
     expect(manifest.scripts?.check).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac'])
@@ -464,6 +477,8 @@ describe('published package surface', () => {
       .toBe('yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop dist:win')
     expect(workspaceManifest.scripts?.['dist:win-portable'])
       .toBe('yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop dist:win-portable')
+    expect(workspaceManifest.scripts?.['dist:linux'])
+      .toBe('yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop dist:linux')
     expect(manifest.build?.afterPack).toBe('./scripts/verify-packaged-runtime.ts')
     expect(manifest.build?.mac).toEqual(expect.objectContaining({
       hardenedRuntime: true,
