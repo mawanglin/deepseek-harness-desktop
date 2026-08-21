@@ -463,7 +463,7 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['dist:linux']).toBe('node scripts/package-linux.ts')
     expect(manifest.scripts?.['check:linux-package']).toContain('yarn run build')
     expect(manifest.scripts?.['check:linux-package']).toContain('yarn run typecheck')
-    expect(manifest.scripts?.['check:linux-package']).toContain('tests/package.spec.ts')
+    expect(manifest.scripts?.['check:linux-package']).toContain('tests/package-linux.spec.ts')
     expect(manifest.scripts?.['check:linux-package']).toContain('tests/verify-linux-packages.spec.ts')
     expect(manifest.scripts?.['check:linux-package']).toContain('tests/release-linux-workflow.spec.ts')
     expect(manifest.scripts?.['check:linux-package']).toContain('yarn run verify:closure')
