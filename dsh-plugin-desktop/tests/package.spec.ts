@@ -35,7 +35,7 @@ const manifest = JSON.parse(readFileSync(new URL('package.json', packageRoot), '
     win?: { icon?: unknown; target?: unknown; artifactName?: unknown }
     nsis?: Record<string, unknown>
     portable?: Record<string, unknown>
-    linux?: { target?: unknown; artifactName?: unknown; icon?: unknown }
+    linux?: { target?: unknown; artifactName?: unknown; icon?: unknown; maintainer?: unknown }
   }
   dependencies?: Record<string, unknown>
   optionalDependencies?: Record<string, unknown>
@@ -437,8 +437,9 @@ describe('published package surface', () => {
       { target: 'rpm', arch: ['x64'] },
       { target: 'AppImage', arch: ['x64'] },
     ])
-    expect(manifest.build?.linux?.artifactName).toBe('DSH-Desktop-${version}-${arch}.${ext}')
+    expect(manifest.build?.linux?.artifactName).toBe('DSH-Desktop-${version}-x64.${ext}')
     expect(manifest.build?.linux?.icon).toBe('build/app-icon.png')
+    expect(manifest.build?.linux?.maintainer).toBe('Anywhere Labs <Cob@88.com>')
   })
 
   it('separates unsigned smoke packaging from the signed macOS release', () => {
