@@ -1,6 +1,6 @@
 # Agent Note: Linux packaging (deb/rpm/AppImage) and release publishing
 
-Status: proposed
+Status: implemented
 
 English | [中文](2026-08-21-linux-packaging-and-release.zh.md)
 
@@ -12,7 +12,7 @@ CI only produces packaged smoke artifacts for Windows and macOS. `desktop-window
 
 Linux packaging follows the same CI-smoke-then-manual-or-tag-triggered-release shape already established for Windows and macOS, scoped strictly to what this repository can own: GitHub Actions and GitHub Releases. It does not touch `dshdesktop.cn` or the in-app update checker; that integration remains a separate, future platform design.
 
-**Electron Builder configuration.** `dsh-plugin-desktop/package.json`'s `build.linux.target` changes from `["dir"]` to a list producing `deb`, `rpm`, and `AppImage`, x64 only (matching the existing Windows `x64`-only scope). `package-dir.mjs` calls `electron-builder --dir`, which overrides any configured target with `dir` for the current host platform, so this change does not affect the existing `yarn check` verification build.
+**Electron Builder configuration.** `dsh-plugin-desktop/package.json`'s `build.linux.target` changes from `["dir"]` to a list producing `deb`, `rpm`, and `AppImage`, x64 only (matching the existing Windows `x64`-only scope). `package-dir.mjs` calls `electron-builder --dir`, which overrides any configured target with `dir` for the current host platform, so this change does not affect the existing `yarn check` verification build. `build.linux.artifactName` hardcodes the literal string `x64` (`DSH-Desktop-${version}-x64.${ext}`) rather than the `${arch}` macro Windows uses: a real `dist:linux` run showed that macro resolves to a per-target OS-native label on Linux (`x86_64` for AppImage, `amd64` for deb) instead of a literal `x64`, which would have produced three artifacts with three different, inconsistent name shapes. `build.linux.maintainer` is set to `Anywhere Labs <Cob@88.com>`; Electron Builder refuses to build `.deb`/`.rpm` without a maintainer identity (from `author.email` or this override), and `package.json` has no `author` field.
 
 **Packaging and verification scripts.** New `scripts/package-linux.ts` mirrors the injectable-boundary shape of `package-win.ts`: an options object carrying `env`, `platform`, `run`, `log`, and so on, so it stays unit-testable without invoking Electron Builder. Unlike the Windows and macOS scripts, it does not need to strip signing secrets — Linux package formats have no code-signing step in this design. It invokes `electron-builder --linux deb rpm AppImage --x64 --publish never`. A new `scripts/verify-linux-packages.ts` mirrors `verify-win-installer.ts`'s pure-byte-header verification style rather than mounting or executing the artifacts (which would need `libfuse2` for AppImage in CI): it checks the `.deb` for the `ar` archive magic `!<arch>\n`, the `.rpm` for the RPM lead magic `ED AB EE DB`, and the `.AppImage` for an ELF header plus the AppImage type-2 magic at offset 8. `package.json` gains `check:linux-package` (mirroring `check:win-package`'s targeted spec list) and `dist:linux` scripts.
 
