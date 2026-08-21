@@ -221,6 +221,16 @@ The output is `dsh-plugin-desktop\\dist\\DSH-Desktop-2.0.1-x64-Portable.zip`. Ex
 
 `yarn dist:mac-smoke` builds one unsigned universal DMG on a native macOS host. The same package runs natively on Intel and Apple Silicon Macs. The command refuses non-macOS hosts and runs the complete product gate before packaging: repository layout and community-contract checks, the Market build and check, then the Desktop build, every TypeScript compiler face, the full unit-test suite, runtime-closure verification, CLI/Loader/profile headless smokes, and the license audit. This includes the real login-shell tests for each supported shell installed on the macOS runner. It then packages without code-signing material, mounts the DMG, and verifies the property list, executable bit, both `x86_64` and `arm64` slices, and `app.asar`. It mirrors `dist:win`'s secret discipline by stripping every Electron Builder macOS signing and notarization variable, sets `CSC_IDENTITY_AUTO_DISCOVERY=false`, disables notarization, and never publishes. The artifact has no Developer ID signature, so Gatekeeper will block it on other machines; it exists so packaging regressions fail in CI before a manual release. The signed and notarized universal release remains `yarn dist:mac` on a credentialed macOS machine and writes its artifact to `dsh-plugin-desktop/dist/mac-release/`.
 
+### Linux deb, rpm, and AppImage
+
+Use `yarn dist:linux` on a native Linux x64 host to build unsigned `.deb`, `.rpm`, and AppImage artifacts:
+
+```bash
+corepack yarn dist:linux
+```
+
+The three artifacts are written to `dsh-plugin-desktop/dist/` as `DSH-Desktop-2.0.1-x64.deb`, `DSH-Desktop-2.0.1-x64.rpm`, and `DSH-Desktop-2.0.1-x64.AppImage`. Electron Builder produces all three from a single packaging pass over one packaged app tree, x64 only, matching the existing Windows and macOS x64/universal scope. In addition to the tools the other platform builds already need, the host must have `rpmbuild` (the `rpm` package) and `fakeroot` installed to produce the `.rpm` and `.deb` respectively. Like the Windows and macOS sections above, this build is unsigned and CI-verification-only for ordinary pushes and pull requests; unlike them, pushing a `v*` git tag also triggers `.github/workflows/release-linux.yml`, which builds these same three artifacts and publishes them to a draft GitHub Release for that tag.
+
 ## Model Experience
 
 None. The desktop package changes application composition and native presentation; it does not add model-visible instructions, tools, events, or request fields.

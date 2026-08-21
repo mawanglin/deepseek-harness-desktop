@@ -221,6 +221,16 @@ corepack.cmd yarn dist:win-portable
 
 `yarn dist:mac-smoke` 会在原生 macOS 宿主机上构建一个未签名的 universal DMG，同一个安装包可以在 Intel 和 Apple Silicon Mac 上原生运行。该命令拒绝非 macOS 宿主，并在打包前运行完整产品 gate：仓库布局与社区契约检查、Market 的 build 与 check，然后再运行 Desktop build、全部 TypeScript compiler face、完整 unit-test suite、runtime-closure 验证、CLI/Loader/profile headless smoke 与 license audit；其中包括对 macOS runner 上已安装的每种受支持 shell 执行真实 login-shell 测试。随后它会在不接触任何签名材料的情况下打包，挂载 DMG，并检查属性列表、主程序执行权限、`x86_64` 与 `arm64` 两个架构切片，以及 `app.asar`。该命令与 `dist:win` 的密钥纪律一致：剥离 Electron Builder 能识别的全部 macOS 签名与公证变量、设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`、关闭 notarization，且从不发布。产物没有 Developer ID 签名，因此 Gatekeeper 会在其他机器上拦截它；它的存在是为了让打包回归在人工发布之前就在 CI 中失败。签名并公证的 universal 正式发布仍是在持有凭证的 macOS 机器上执行 `yarn dist:mac`，产物写入 `dsh-plugin-desktop/dist/mac-release/`。
 
+### Linux deb、rpm 与 AppImage
+
+在原生 Linux x64 宿主机上执行 `yarn dist:linux`，构建未签名的 `.deb`、`.rpm` 与 AppImage 产物：
+
+```bash
+corepack yarn dist:linux
+```
+
+三个产物会写入 `dsh-plugin-desktop/dist/`，分别是 `DSH-Desktop-2.0.1-x64.deb`、`DSH-Desktop-2.0.1-x64.rpm` 与 `DSH-Desktop-2.0.1-x64.AppImage`。Electron Builder 在同一次打包流程中基于同一份打包好的应用树产出全部三种格式，仅 x64，与现有 Windows/macOS 的 x64/universal 范围一致。除了其他平台构建已经需要的工具之外，宿主机还必须安装 `rpmbuild`（`rpm` 包）与 `fakeroot`，分别用于生成 `.rpm` 与 `.deb`。与上面的 Windows/macOS 小节一样，这个构建未签名，对普通 push 和 pull request 只用于 CI 校验；不同的是，推送 `v*` git tag 还会触发 `.github/workflows/release-linux.yml`，该 workflow 会构建这三个产物，并把它们发布到该 tag 的草稿 GitHub Release 上。
+
 ## 模型体验
 
 无。desktop package 只改变应用组合与原生呈现，不增加任何模型可见的指令、工具、事件或请求字段。
