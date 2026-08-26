@@ -19,6 +19,7 @@ import {
   installDesktopPnpmRuntime,
 } from './desktop-runtime-environment.ts'
 import { desktopProductVersion, ElectronDesktopRuntime } from './electron-runtime.ts'
+import { installChineseApplicationMenu } from './application-menu.ts'
 import {
   ElectronStderrLogger,
   installDesktopChildProcessLogging,
@@ -371,6 +372,7 @@ async function start(): Promise<void> {
     startupStage = 'shell-environment'
     lifecycleRecorder.transitionStartupStage(startupStage)
     if (process.platform === 'win32') app.setAppUserModelId('ai.deepseek.dsh.desktop')
+    installChineseApplicationMenu(process.platform)
     if (app.isPackaged && process.cwd() === '/') process.chdir(app.getPath('home'))
     const shellEnvironmentResolution = await resolveDesktopShellEnvironment({
       environment: process.env,

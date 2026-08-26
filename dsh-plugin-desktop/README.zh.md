@@ -174,6 +174,8 @@ DSH Desktop 将 UTF-8 日志写入 Electron 用户数据目录：Windows 位于 
 
 关闭窗口会隐藏窗口，Host Cordis 树继续运行。托盘可以重新打开窗口、选择激活 profile、打开隔离的 DSH 终端、检查 stable release、通过标准 settings namespace 更改模式，或请求显式退出。Profile 与模式切换都会先 dispose 当前 Cordis 树，再让 Electron relaunch。原生退出、`SIGINT` 与 `SIGTERM` 也会在退出前请求 dispose；超过五秒或收到重复请求时会强制完成最终退出。导航与重定向被限制在确切的 loopback origin；外部 HTTP、HTTPS 与邮件链接由操作系统打开；renderer 启用 `contextIsolation` 与 Chromium sandbox，并关闭 Node integration。
 
+macOS 与 Linux 会把 Electron 默认的英文菜单栏替换为中文应用菜单（`文件`/`编辑`/`视图`/`窗口`/`帮助`，macOS 另含应用菜单），让窗口与系统菜单栏与产品语言一致。Windows 继续沿用既有的菜单栏移除。
+
 ## 打包
 
 `yarn package:dir` 为当前宿主平台创建未封装目录。如果应用归档缺少 desktop 更新与终端模块、DSH CLI bootstrap、内置 pnpm 入口或物理 deployment package，packaged-runtime gate 会拒绝该产物。Electron Builder 会把根 manifest、desktop runtime 与完整依赖树输出到 `app.asar.unpacked`；Host profile boot 与 CLI bootstrap 都会使用这棵物理树，因此 DSH profile fallback 的符号链接不会指向虚拟 ASAR 目录。`build/app-icon.png` 保持为未经修改的 iOS Default 源图，并继续作为 Windows 应用图标。构建过程会运行 `scripts/generate-mac-app-icon.mjs`，把该图缩放为 824 × 824 像素并居中放入透明的 1024 × 1024 画布；macOS 打包与运行中的 Dock 都使用生成的 `build/app-icon-mac.png`。构建过程还会运行 `scripts/generate-linux-icons.mjs`，从源图派生 `build/icons/` 下 16 到 512 像素的标准 freedesktop hicolor 图标集；Linux deb、rpm 与 AppImage 打包会把它们安装到 `/usr/share/icons/hicolor/<size>x<size>/apps/`，让桌面环境能够解析打包产物中 `.desktop` 文件的 `Icon=` 条目（单个超大 PNG 只会落入非标准尺寸目录，启动器会将其忽略）。`build/tray-icon.svg` 是品牌蓝托盘源文件：构建过程会派生由 macOS 系统自动着色的模板图，以及固定品牌蓝的 Windows 与 Linux 托盘图。
