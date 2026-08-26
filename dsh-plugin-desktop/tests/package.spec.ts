@@ -397,6 +397,7 @@ describe('published package surface', () => {
     expect(manifest.files).toEqual(expect.arrayContaining([
       'build/app-icon.png',
       'build/app-icon-mac.png',
+      'build/icons',
       'build/tray-icon.svg',
       'build/tray-icon*.png',
       'docs/**',
@@ -438,7 +439,7 @@ describe('published package surface', () => {
       { target: 'AppImage', arch: ['x64'] },
     ])
     expect(manifest.build?.linux?.artifactName).toBe('DSH-Desktop-${version}-x64.${ext}')
-    expect(manifest.build?.linux?.icon).toBe('build/app-icon.png')
+    expect(manifest.build?.linux?.icon).toBe('build/icons')
     expect(manifest.build?.linux?.maintainer).toBe('Anywhere Labs <cob@88.com>')
   })
 
@@ -446,6 +447,7 @@ describe('published package surface', () => {
     const packageDir = readFileSync(new URL('scripts/package-dir.mjs', packageRoot), 'utf8')
 
     expect(manifest.scripts?.build).toContain('node scripts/generate-mac-app-icon.mjs')
+    expect(manifest.scripts?.build).toContain('node scripts/generate-linux-icons.mjs')
     expect(manifest.scripts?.['package:dir']).toBe('yarn run build && node scripts/package-dir.mjs')
     expect(packageDir).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
     expect(manifest.scripts?.['dist:mac']).toBe('node scripts/release-mac.ts')
@@ -597,6 +599,24 @@ describe('published package surface', () => {
       trimOffsetLeft: -100,
       trimOffsetTop: -100,
     }))
+  })
+
+  it('generates the standard freedesktop hicolor Linux icon set from the master', async () => {
+    for (const size of [16, 24, 32, 48, 64, 128, 256, 512]) {
+      const metadata = await sharp(
+        readFileSync(new URL(`build/icons/${size}x${size}.png`, packageRoot)),
+      ).metadata()
+
+      expect(metadata).toEqual(expect.objectContaining({
+        format: 'png',
+        width: size,
+        height: size,
+        depth: 'uchar',
+        bitsPerSample: 8,
+        channels: 4,
+        hasAlpha: true,
+      }))
+    }
   })
 
   it('keeps Electron out of production dependencies consumed by electron-builder', () => {

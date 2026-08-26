@@ -182,6 +182,17 @@ jobs:
         env:
           DSH_PACKAGE_CHECK_ALREADY_RAN: '1'
         run: yarn workspace dsh-plugin-desktop dist:linux
+      - name: Verify Linux packages install standard hicolor icons
+        run: |
+          set -euo pipefail
+          deb="$(find dsh-plugin-desktop/dist -maxdepth 1 -name 'DSH-Desktop-*.deb' | head -n 1)"
+          rpm="$(find dsh-plugin-desktop/dist -maxdepth 1 -name 'DSH-Desktop-*.rpm' | head -n 1)"
+          test -n "$deb" && test -n "$rpm"
+          deb_icons="$(dpkg-deb -c "$deb" | grep -cE 'usr/share/icons/hicolor/(16x16|24x24|32x32|48x48|64x64|128x128|256x256|512x512)/apps/' || true)"
+          rpm_icons="$(rpm -qlp "$rpm" | grep -cE 'usr/share/icons/hicolor/(16x16|24x24|32x32|48x48|64x64|128x128|256x256|512x512)/apps/' || true)"
+          echo "deb hicolor icon entries: $deb_icons; rpm hicolor icon entries: $rpm_icons"
+          test "$deb_icons" -ge 8
+          test "$rpm_icons" -ge 8
 
   # Upstream toolchain smoke: the portable-shell scripts must resolve the
   # pinned submodule's own Yarn/pnpm release on Windows.
