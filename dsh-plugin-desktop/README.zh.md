@@ -160,7 +160,7 @@ npx dsh-plugin-desktop
 
 Release operator 必须先发布两个平台产物，再让版本可被发现。产物与 download redirect 准备完成后，在 Upstash Redis console 中把 `deepseek-harness-desktop:release:version` 设置为规范的 stable 版本，例如 `SET deepseek-harness-desktop:release:version 2.0.1`。版本 API 会立即生效；key 缺失、服务不可用或值无效时，Desktop 不会显示任何提示。
 
-在 macOS 与 Windows 上，**Open DSH Terminal** 会打开以当前激活 profile 为工作目录的系统终端。欢迎信息会显示应用版本、当前 profile、profile 目录与 DSH home，并列出配置与插件管理命令。在该终端内，裸 `dsh`、`dsh --dump-config`，以及没有选择 profile 的 plugin 子命令都会默认使用当前激活 profile；显式 `--profile` 与上游 `web` alias 会保留原有含义。DSH Desktop 会在自身 user-data 目录下按 profile 生成私有 `dsh`、`pnpm` 与 `node` shim，设置 `DSH_HOME`，使用当前 profile 作为工作目录，并且只在该终端的 `PATH` 前置 shim 目录；之后切换 profile 不会改变已经打开的终端命令。它不会修改全局环境或 shell 启动文件。macOS launcher 会先保留用户的交互式 zsh 或 bash 设置，再恢复 desktop 自有变量。Windows 会依次选择 PowerShell 7、Windows PowerShell 或命令提示符，并在新的 Windows Terminal 窗口中打开；如果 `wt.exe` 不可用，则由私有 `cmd start` broker 创建可见控制台。同步启动失败与 broker 非正常退出会显示在原生错误对话框中。Linux 不组合该终端命令。
+在 macOS、Windows 与 Linux 上，**Open DSH Terminal** 会打开以当前激活 profile 为工作目录的系统终端。欢迎信息会显示应用版本、当前 profile、profile 目录与 DSH home，并列出配置与插件管理命令。在该终端内，裸 `dsh`、`dsh --dump-config`，以及没有选择 profile 的 plugin 子命令都会默认使用当前激活 profile；显式 `--profile` 与上游 `web` alias 会保留原有含义。DSH Desktop 会在自身 user-data 目录下按 profile 生成私有 `dsh`、`pnpm` 与 `node` shim，设置 `DSH_HOME`，使用当前 profile 作为工作目录，并且只在该终端的 `PATH` 前置 shim 目录；之后切换 profile 不会改变已经打开的终端命令。它不会修改全局环境或 shell 启动文件。macOS launcher 会先保留用户的交互式 zsh 或 bash 设置，再恢复 desktop 自有变量。Windows 会依次选择 PowerShell 7、Windows PowerShell 或命令提示符，并在新的 Windows Terminal 窗口中打开；如果 `wt.exe` 不可用，则由私有 `cmd start` broker 创建可见控制台。Linux 会按顺序通过 `PATH` 解析 gnome-terminal、konsole、xfce4-terminal、kitty、alacritty、xterm、Debian 的 `x-terminal-emulator` alternatives 目标或 freedesktop 的 `xdg-terminal-exec` launcher，并在找到的第一个中打开生成的欢迎脚本；如果没有可用的终端模拟器，则显示同一个原生错误对话框。同步启动失败与 broker 非正常退出会显示在原生错误对话框中。
 
 ## 日志与诊断
 
@@ -229,7 +229,7 @@ corepack.cmd yarn dist:win-portable
 corepack yarn dist:linux
 ```
 
-三个产物会写入 `dsh-plugin-desktop/dist/`，分别是 `DSH-Desktop-2.0.1-x64.deb`、`DSH-Desktop-2.0.1-x64.rpm` 与 `DSH-Desktop-2.0.1-x64.AppImage`。Electron Builder 在同一次打包流程中基于同一份打包好的应用树产出全部三种格式，仅 x64，与现有 Windows/macOS 的 x64/universal 范围一致。除了其他平台构建已经需要的工具之外，宿主机还必须安装 `rpmbuild`（`rpm` 包）与 `fakeroot`，分别用于生成 `.rpm` 与 `.deb`。与上面的 Windows/macOS 小节一样，这个构建未签名，对普通 push 和 pull request 只用于 CI 校验；不同的是，推送 `v*` git tag 还会触发 `.github/workflows/release-linux.yml`，该 workflow 会构建这三个产物，并把它们发布到该 tag 的草稿 GitHub Release 上。
+三个产物会写入 `dsh-plugin-desktop/dist/`，分别是 `DSH-Desktop-2.0.1-x64.deb`、`DSH-Desktop-2.0.1-x64.rpm` 与 `DSH-Desktop-2.0.1-x64.AppImage`。Electron Builder 在同一次打包流程中基于同一份打包好的应用树产出全部三种格式，仅 x64，与现有 Windows/macOS 的 x64/universal 范围一致。打包后的 Linux 应用会组合 **Open DSH Terminal** 托盘命令；它通过 `PATH` 解析系统终端模拟器，未安装任何模拟器时显示原生错误对话框。除了其他平台构建已经需要的工具之外，宿主机还必须安装 `rpmbuild`（`rpm` 包）与 `fakeroot`，分别用于生成 `.rpm` 与 `.deb`。与上面的 Windows/macOS 小节一样，这个构建未签名，对普通 push 和 pull request 只用于 CI 校验；不同的是，推送 `v*` git tag 还会触发 `.github/workflows/release-linux.yml`，该 workflow 会构建这三个产物，并把它们发布到该 tag 的草稿 GitHub Release 上。
 
 ## 模型体验
 
@@ -244,7 +244,7 @@ corepack yarn dist:linux
 - 添加或删除 profile bundle 后必须重启 DSH Desktop；Launcher 不监听 profile manifest。从托盘选择其他 profile 时会自动完成该重启。
 - 切换 compatibility/advanced 模式按设计必然重启应用；存活的 generation 不会热切换 Loader row、slot 所有权或原生材质。
 - Linux 不支持高级模式。Linux 继续使用兼容呈现。
-- macOS 与 Windows 托盘终端会提供私有 `dsh`、`pnpm` 与 `node` shim。除此之外，Host runtime 会在当前 Electron 进程的 `PATH` 中公开内置 `pnpm` 命令作为 ambient compatibility，并提供受管 `desktopPnpm` service；这些命令都不会加入系统 `PATH`，Linux 目前也没有 desktop 终端命令。
+- 托盘终端会提供私有 `dsh`、`pnpm` 与 `node` shim。除此之外，Host runtime 会在当前 Electron 进程的 `PATH` 中公开内置 `pnpm` 命令作为 ambient compatibility，并提供受管 `desktopPnpm` service；这些命令都不会加入系统 `PATH`，Linux 终端命令依赖已安装的终端模拟器（gnome-terminal、konsole、xfce4-terminal、kitty、alacritty、xterm、`x-terminal-emulator` 或 `xdg-terminal-exec`）。
 - 在 Windows 上，ambient `pnpm` 命令与 lifecycle Node helper 是 `.cmd` shim。`desktopPnpm.run()`、`runPlugin()` 和 `installPlugin()` 会启动准确的已打包 entry，从而避免 manager process 的 shell lookup；上游 `dsh plugin`、PowerShell 与命令提示符则可通过 command interpreter 解析 ambient shim。第三方插件直接调用 Node `spawn('pnpm', { shell: false })`，或 lifecycle script 直接以 `shell: false` 执行其 `.cmd` `npm_node_execpath`，仍属于不可移植行为，应改用受管 service 或 shell-aware 启动路径。
 - `dshmarket@1.2.3` 仍是用户可选安装的第三方 package，而不是内置 marketplace。只有重新审计的版本同时消费可选 Desktop service、保留普通 DSH fallback，并包含再分发所需的完整 license notice 后，才会重新评估预装。
 - 更新交接只验证下载容器，不验证 publisher 身份。macOS 仍要求用户从已打开的 DMG 替换应用；Windows 会运行已下载的 NSIS 安装器，但本地 `dist:win` 产物没有签名。签名产物、Authenticode/publisher 校验、SmartScreen 信誉与原生升级测试仍是发布 gate。

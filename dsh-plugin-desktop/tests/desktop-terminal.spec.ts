@@ -98,6 +98,32 @@ function windowsOptions(stateDir: string, spawn: DesktopTerminalSpawn): DesktopT
   }
 }
 
+function linuxOptions(stateDir: string, spawn: DesktopTerminalSpawn): DesktopTerminalOptions {
+  return {
+    platform: 'linux',
+    appExecutable: '/opt/DSH Desktop/dsh-desktop',
+    dshBootstrapPath: '/opt/DSH Desktop/resources/app.asar/lib/dsh-terminal-bootstrap.js',
+    pnpmBinPath: '/opt/DSH Desktop/resources/app.asar/node_modules/pnpm/bin/pnpm.mjs',
+    electronVersion: '43.4.0',
+    profileName: 'desktop',
+    productVersion: '2.0.0',
+    profileDir: "/home/example/.local/share/DSH O'Brien/profiles/desktop",
+    homeDir: "/home/example/.local/share/DSH O'Brien",
+    installRecoveryStatePath: '/home/example/.config/DSH Desktop/plugin-install-recovery/state.json',
+    stateDir,
+    spawn,
+    environment: {
+      PATH: '/usr/local/bin:/usr/bin:/bin',
+      DSH_HOME: '/inherited/dsh-home',
+      electron_run_as_node: 'inherited-node-mode',
+      KEEP: 'value',
+    },
+    linuxExecutableResolver: command => command === 'gnome-terminal'
+      ? '/usr/bin/gnome-terminal'
+      : undefined,
+  }
+}
+
 afterEach(() => {
   for (const dir of temporaryDirectories.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
@@ -460,12 +486,164 @@ describe('desktop terminal environment', () => {
     }))
   })
 
+  it('generates Linux POSIX shims and opens the welcome script through a discovered terminal', () => {
+    const stateDir = join(temporaryDirectory(), 'terminal state')
+    const harness = spawnHarness()
+    const options = linuxOptions(stateDir, harness.spawn)
+
+    const launch = openDesktopTerminal(options)
+
+    expect(launch).toMatchObject({
+      shimDir: join(stateDir, 'bin'),
+      dshShimPath: join(stateDir, 'bin', 'dsh'),
+      pnpmShimPath: join(stateDir, 'bin', 'pnpm'),
+      nodeShimPath: join(stateDir, 'bin', 'node'),
+      welcomePath: join(stateDir, 'welcome.sh'),
+      child: harness.child,
+    })
+    if (process.platform !== 'win32') {
+      expect(lstatSync(stateDir).mode & 0o777).toBe(0o700)
+      expect(lstatSync(launch.shimDir).mode & 0o777).toBe(0o700)
+      for (const filename of [launch.dshShimPath, launch.pnpmShimPath, launch.nodeShimPath, launch.welcomePath]) {
+        expect(lstatSync(filename).mode & 0o777).toBe(0o700)
+      }
+    }
+
+    const dshShim = readFileSync(launch.dshShimPath, 'utf8')
+    expect(dshShim).toContain("DSH_DESKTOP_DEFAULT_PROFILE='desktop' ELECTRON_RUN_AS_NODE=1 exec")
+    expect(dshShim).toContain('--expose-internals')
+    expect(dshShim).toContain("'/opt/DSH Desktop/dsh-desktop'")
+    expect(dshShim).toContain("'/opt/DSH Desktop/resources/app.asar/lib/dsh-terminal-bootstrap.js'")
+    expect(dshShim).toContain('"$@"')
+    expect(dshShim).not.toContain('npm_config_')
+    const pnpmShim = readFileSync(launch.pnpmShimPath, 'utf8')
+    expect(pnpmShim).toContain('ELECTRON_RUN_AS_NODE=1 npm_config_runtime=electron')
+    expect(pnpmShim).toContain("npm_config_target='43.4.0'")
+    expect(pnpmShim).toContain("npm_config_disturl='https://electronjs.org/headers'")
+    const nodeShim = readFileSync(launch.nodeShimPath, 'utf8')
+    expect(nodeShim).toBe([
+      '#!/bin/sh',
+      `ELECTRON_RUN_AS_NODE=1 exec '/opt/DSH Desktop/dsh-desktop' "$@"`,
+      '',
+    ].join('\n'))
+    expect(nodeShim).not.toContain('npm_config_')
+
+    const welcome = readFileSync(launch.welcomePath, 'utf8')
+    expect(welcome).toContain('unset ELECTRON_RUN_AS_NODE')
+    expect(welcome).not.toContain('ELECTRON_RUN_AS_NODE=1')
+    expect(welcome).toContain("printf '\\033[2J\\033[3J\\033[H'")
+    expect(welcome).toContain('DSH Desktop 2.0.0 terminal')
+    expect(welcome).toContain('Profile: desktop')
+    expect(welcome).toContain('Plugin commands without --profile modify the desktop profile.')
+    expect(welcome).toContain('dsh --dump-config')
+    expect(welcome).toContain('dsh plugin add <third-party-plugin>')
+    expect(welcome).toContain('dsh plugin remove <third-party-plugin>')
+    expect(welcome).toContain('dsh plugin update')
+    expect(welcome).toContain('Restart DSH Desktop after plugin changes.')
+    expect(welcome).not.toContain(' -l')
+    expect(welcome).toContain('exec "${SHELL}" --noprofile --rcfile')
+    expect(welcome).toContain('exec "${SHELL}" -i')
+    expect(welcome).toContain('exec /bin/bash --noprofile --rcfile')
+    expect(welcome).not.toContain('exec /bin/zsh')
+
+    const zshRc = readFileSync(join(stateDir, '.zshrc'), 'utf8')
+    expect(zshRc).toContain('source "${DSH_DESKTOP_USER_ZDOTDIR}/.zshrc"')
+    expect(zshRc).toContain('unset ELECTRON_RUN_AS_NODE')
+    expect(zshRc).toContain(`path=('${launch.shimDir}' $path)`)
+    const bashRc = readFileSync(join(stateDir, 'bashrc'), 'utf8')
+    expect(bashRc).toContain('. "${DSH_DESKTOP_USER_BASHRC}"')
+    expect(bashRc.indexOf('. "${DSH_DESKTOP_USER_BASHRC}"')).toBeLessThan(
+      bashRc.indexOf(`export PATH='${launch.shimDir}'`),
+    )
+    if (process.platform === 'linux') {
+      expect(spawnSync('/bin/sh', ['-n', launch.dshShimPath]).status).toBe(0)
+      expect(spawnSync('/bin/sh', ['-n', launch.pnpmShimPath]).status).toBe(0)
+      expect(spawnSync('/bin/sh', ['-n', launch.nodeShimPath]).status).toBe(0)
+      expect(spawnSync('/bin/sh', ['-n', launch.welcomePath]).status).toBe(0)
+    }
+
+    expect(harness.calls).toHaveLength(1)
+    expect(harness.calls[0]).toEqual({
+      command: '/usr/bin/gnome-terminal',
+      args: ['--', launch.welcomePath],
+      options: {
+        cwd: options.profileDir,
+        detached: true,
+        env: {
+          KEEP: 'value',
+          PATH: `${launch.shimDir}:/usr/local/bin:/usr/bin:/bin`,
+          DSH_HOME: options.homeDir,
+          DSH_DESKTOP_INSTALL_RECOVERY_STATE_PATH: options.installRecoveryStatePath,
+        },
+        shell: false,
+        stdio: 'ignore',
+        windowsHide: false,
+      },
+    })
+    expect(harness.unref).toHaveBeenCalledOnce()
+    expect(options.environment).toEqual({
+      PATH: '/usr/local/bin:/usr/bin:/bin',
+      DSH_HOME: '/inherited/dsh-home',
+      electron_run_as_node: 'inherited-node-mode',
+      KEEP: 'value',
+    })
+  })
+
+  it('prefers an explicit Linux terminal override', () => {
+    const stateDir = join(temporaryDirectory(), 'terminal-state')
+    const harness = spawnHarness()
+    const options = linuxOptions(stateDir, harness.spawn)
+    options.linuxTerminal = { executable: '/usr/bin/kitty' }
+
+    const launch = openDesktopTerminal(options)
+
+    expect(harness.calls).toHaveLength(1)
+    expect(harness.calls[0]?.command).toBe('/usr/bin/kitty')
+    expect(harness.calls[0]?.args).toEqual([launch.welcomePath])
+    expect(harness.calls[0]?.options.shell).toBe(false)
+  })
+
+  it('falls back through Linux terminal candidates and fails loud without one', () => {
+    const stateDir = join(temporaryDirectory(), 'terminal-state')
+    const harness = spawnHarness()
+    const probes: string[] = []
+    const options = linuxOptions(stateDir, harness.spawn)
+    delete options.linuxExecutableResolver
+    options.linuxExecutableExists = filename => {
+      probes.push(filename)
+      return false
+    }
+
+    expect(() => openDesktopTerminal(options)).toThrow(/terminal requires/u)
+    const shimDir = join(stateDir, 'bin')
+    const expected: string[] = []
+    for (const command of [
+      'gnome-terminal',
+      'konsole',
+      'xfce4-terminal',
+      'kitty',
+      'alacritty',
+      'xterm',
+      'x-terminal-emulator',
+      'xdg-terminal-exec',
+    ]) {
+      expected.push(
+        join(shimDir, command),
+        `/usr/local/bin/${command}`,
+        `/usr/bin/${command}`,
+        `/bin/${command}`,
+      )
+    }
+    expect(probes).toEqual(expected)
+    expect(harness.calls).toHaveLength(0)
+  })
+
   it('accepts localized macOS profile names and rejects path escapes before writing state', () => {
     const root = temporaryDirectory()
     const harness = spawnHarness()
     const unsupported = macOptions(join(root, 'unsupported'), harness.spawn)
-    unsupported.platform = 'linux'
-    expect(() => openDesktopTerminal(unsupported)).toThrow('terminal is unsupported on linux')
+    unsupported.platform = 'freebsd'
+    expect(() => openDesktopTerminal(unsupported)).toThrow('terminal is unsupported on freebsd')
     expect(() => lstatSync(unsupported.stateDir)).toThrow()
 
     const unsafe = macOptions(join(root, 'unsafe'), harness.spawn)
