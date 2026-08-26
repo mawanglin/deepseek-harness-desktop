@@ -49,7 +49,7 @@ describe('macOS release workflow', () => {
     expect(verifyStep?.run).toContain('tag" = "v$version"')
   })
 
-  it('creates a draft release only when missing, then uploads the DMG', () => {
+  it('creates a draft release only when missing, then uploads the DMG from the smoke output', () => {
     const job = workflow.jobs?.['release-mac']
     const publishStep = job?.steps?.find(
       step => step.name === "Publish to the tag's GitHub Release",
@@ -57,6 +57,6 @@ describe('macOS release workflow', () => {
     expect(publishStep?.run).toContain('gh release create "$tag"')
     expect(publishStep?.run).toContain('--draft')
     expect(publishStep?.run).toContain('gh release upload "$tag"')
-    expect(publishStep?.run).toContain('DSH-Desktop-*.dmg')
+    expect(publishStep?.run).toContain('dsh-plugin-desktop/dist/mac-smoke/*.dmg')
   })
 })

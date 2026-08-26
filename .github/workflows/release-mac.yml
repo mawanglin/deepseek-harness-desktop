@@ -57,4 +57,4 @@ jobs:
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --title "$tag" --generate-notes
           fi
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
-            dsh-plugin-desktop/dist/DSH-Desktop-*.dmg
+            dsh-plugin-desktop/dist/mac-smoke/*.dmg

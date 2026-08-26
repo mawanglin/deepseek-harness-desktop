@@ -629,9 +629,9 @@ describe('desktop terminal environment', () => {
     ]) {
       expected.push(
         join(shimDir, command),
-        `/usr/local/bin/${command}`,
-        `/usr/bin/${command}`,
-        `/bin/${command}`,
+        join('/usr/local/bin', command),
+        join('/usr/bin', command),
+        join('/bin', command),
       )
     }
     expect(probes).toEqual(expected)
