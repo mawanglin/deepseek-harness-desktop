@@ -6,6 +6,7 @@ interface WorkflowStep {
   readonly name?: string
   readonly run?: string
   readonly env?: Record<string, unknown>
+  readonly shell?: string
 }
 
 interface WorkflowJob {
