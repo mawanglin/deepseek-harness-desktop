@@ -432,6 +432,7 @@ async function start(): Promise<void> {
       profileName: activeProfileName,
       profileDir: activeProfileDir,
       generationId,
+      warn: message => electronLogger.error(message),
     })
     const stateCommit = new DesktopStartupStateCommit({
       profile: profileStartup,

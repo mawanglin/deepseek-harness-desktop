@@ -1,0 +1,5 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the last
+# confirmed-consistent state. Both languages carry equal authority. Update both files
+# and re-record their hashes with git hash-object after editing either side.
+2026-08-26-install-recovery-stale-discard.md: ffcf0b4ef59740f3e16e2714ce44e1bd4e4a8cd8
+2026-08-26-install-recovery-stale-discard.zh.md: c085e6937e23080ba56ce3e67ce10c562ccbc2cf

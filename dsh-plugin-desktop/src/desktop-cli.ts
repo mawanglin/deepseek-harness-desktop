@@ -197,6 +197,7 @@ export async function runDesktopDshCli(
       profileName: installProfileName,
       profileDir: resolveProfileDir(installProfileName, homeDir),
       generationId: `terminal:${randomUUID()}`,
+      warn: message => process.stderr.write(`${message}\n`),
     })
     await loadWithInstallRecovery(load, store)
     return

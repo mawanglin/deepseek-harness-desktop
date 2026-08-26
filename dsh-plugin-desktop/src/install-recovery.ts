@@ -125,6 +125,8 @@ export interface DesktopInstallRecoveryStoreOptions {
   readonly profileDir: string
   /** Opaque identity minted once for the current Electron main generation. */
   readonly generationId: string
+  /** Optional sink for diagnostics about auto-discarded stale transactions. */
+  readonly warn?: (message: string) => void
   readonly now?: () => number
 }
 
@@ -167,6 +169,19 @@ function timestamp(now: () => number): string {
 
 function sha256(bytes: Uint8Array | string): string {
   return createHash('sha256').update(bytes).digest('hex')
+}
+
+/**
+ * Whether a pending transaction holds no live actor and can be discarded
+ * without restoring anything: installs that finished (awaiting-restart), were
+ * verified (verified), or were already rolled back (rolled-back). The
+ * terminal that sealed them has exited, and the launcher only acts on them at
+ * startup when the profile matches — a transaction in one of these phases
+ * would otherwise block every later install forever. Earlier phases may still
+ * have a running pnpm or an in-flight recovery and are never discarded.
+ */
+function isStaleDiscardablePhase(phase: DesktopInstallRecoveryPhase): boolean {
+  return phase === 'awaiting-restart' || phase === 'verified' || phase === 'rolled-back'
 }
 
 function profileIdentity(profileDir: string): string {
@@ -342,6 +357,7 @@ export class DesktopInstallRecoveryStore {
   readonly profileDir: string
   readonly generationId: string
   private readonly now: () => number
+  private readonly warn: (message: string) => void
 
   constructor(options: DesktopInstallRecoveryStoreOptions) {
     this.statePath = assertAbsoluteFile('plugin install recovery state path', options.statePath)
@@ -357,6 +373,7 @@ export class DesktopInstallRecoveryStore {
     assertOpaqueId('generation id', options.generationId)
     this.generationId = options.generationId
     this.now = options.now ?? Date.now
+    this.warn = options.warn ?? (() => {})
   }
 
   /** Read and validate the current WAL without changing its phase. */
@@ -395,8 +412,17 @@ export class DesktopInstallRecoveryStore {
     }
     assertPackageVersion(input.packageVersion)
     assertOpaqueId('receipt id', input.receiptId)
-    if (await this.read() !== undefined) {
-      throw new Error(`${BIN_NAME}: another plugin install recovery transaction is pending`)
+    const pending = await this.read()
+    if (pending !== undefined) {
+      if (isStaleDiscardablePhase(pending.phase)) {
+        await this.discardStale(pending)
+      } else {
+        throw new Error(
+          `${BIN_NAME}: another plugin install recovery transaction is pending `
+          + `(phase ${pending.phase} for profile ${pending.profileName}, created by ${pending.createdByGeneration}); `
+          + `resolve it or remove ${this.statePath}`,
+        )
+      }
     }
     await this.assertProfileDirectory()
     const transactionId = randomUUID()
@@ -443,6 +469,22 @@ export class DesktopInstallRecoveryStore {
       await rm(backupDir, { recursive: true, force: true }).catch(() => {})
       throw cause
     }
+  }
+
+  /**
+   * Remove one stale transaction's WAL record and its private preimages
+   * without touching profile files: the transaction's declarative state is
+   * already self-consistent and no live actor can ever resolve it. Callers
+   * hold the mutation lock.
+   * @param state - the stale transaction to discard.
+   */
+  private async discardStale(state: DesktopInstallRecoveryTransaction): Promise<void> {
+    this.warn(
+      `${BIN_NAME}: discarding stale plugin install recovery transaction ${state.transactionId} `
+      + `(phase ${state.phase} for profile ${state.profileName}); it can no longer be verified or rolled back`,
+    )
+    await unlink(this.statePath)
+    await rm(this.backupDirectory(state.transactionId), { recursive: true, force: true })
   }
 
   /** Seal exact post-install hashes before exposing success or a restart grant. */
@@ -513,6 +555,10 @@ export class DesktopInstallRecoveryStore {
     const state = await this.read()
     if (state === undefined) return { action: 'none' }
     if (!this.matchesCurrentProfile(state)) {
+      if (isStaleDiscardablePhase(state.phase)) {
+        await this.discardStale(state)
+        return { action: 'none' }
+      }
       return { action: 'deferred', reason: 'profile-mismatch', transaction: state }
     }
     if (state.phase === 'verified' || state.phase === 'rolled-back' || state.phase === 'manual-recovery-required') {

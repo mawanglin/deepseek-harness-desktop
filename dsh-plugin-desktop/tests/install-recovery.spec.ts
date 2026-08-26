@@ -55,12 +55,17 @@ function fixture(files: readonly (keyof typeof PREINSTALL)[] = DESKTOP_INSTALL_R
   }
 }
 
-function store(target: Fixture, generationId = 'generation-0001'): DesktopInstallRecoveryStore {
+function store(
+  target: Fixture,
+  generationId = 'generation-0001',
+  options: { profileName?: string; profileDir?: string; warn?: (message: string) => void } = {},
+): DesktopInstallRecoveryStore {
   return new DesktopInstallRecoveryStore({
     statePath: target.statePath,
-    profileName: 'desktop',
-    profileDir: target.profileDir,
+    profileName: options.profileName ?? 'desktop',
+    profileDir: options.profileDir ?? target.profileDir,
     generationId,
+    ...(options.warn === undefined ? {} : { warn: options.warn }),
     now: () => 1_800_000_000_000,
   })
 }
@@ -400,6 +405,145 @@ describe('Desktop plugin install recovery WAL', () => {
       transaction: { rollbackNotifiedAt: notified.rollbackNotifiedAt },
     })
     expect(existsSync(target.statePath)).toBe(true)
+  })
+})
+
+describe('stale plugin install recovery transaction discard', () => {
+  it('begin discards a stale awaiting-restart transaction and starts the new install', async () => {
+    const target = fixture()
+    const origin = store(target)
+    const sealed = await origin.begin({
+      packageName: 'plugin-a',
+      packageVersion: '1.0.0',
+      receiptId: 'receipt-0001',
+    })
+    writePostinstall(target)
+    await origin.seal(sealed.transactionId)
+    const staleBackupDir = join(dirname(target.statePath), 'backups', sealed.transactionId)
+    expect(existsSync(staleBackupDir)).toBe(true)
+
+    const warnings: string[] = []
+    const next = store(target, 'generation-0002', { warn: message => warnings.push(message) })
+    const fresh = await next.begin({
+      packageName: 'plugin-b',
+      packageVersion: '2.0.0',
+      receiptId: 'receipt-0002',
+    })
+
+    expect(fresh.phase).toBe('prepared')
+    expect(fresh.packageName).toBe('plugin-b')
+    expect(existsSync(staleBackupDir)).toBe(false)
+    expect(warnings.some(message => message.includes('discarding stale'))).toBe(true)
+    await expect(next.read()).resolves.toMatchObject({ transactionId: fresh.transactionId, phase: 'prepared' })
+  })
+
+  it('begin discards a stale transaction for another profile so installs are never blocked forever', async () => {
+    const target = fixture()
+    const desktop = store(target)
+    const sealed = await desktop.begin({
+      packageName: 'plugin-a',
+      packageVersion: '1.0.0',
+      receiptId: 'receipt-0001',
+    })
+    writePostinstall(target)
+    await desktop.seal(sealed.transactionId)
+
+    const webDir = join(target.root, 'profiles', 'web')
+    mkdirSync(webDir, { recursive: true })
+    for (const name of DESKTOP_INSTALL_RECOVERY_FILES) {
+      writeFileSync(join(webDir, name), PREINSTALL[name], { mode: 0o640 })
+    }
+
+    const warnings: string[] = []
+    const web = store(target, 'generation-0002', {
+      profileName: 'web',
+      profileDir: webDir,
+      warn: message => warnings.push(message),
+    })
+    const fresh = await web.begin({
+      packageName: 'plugin-b',
+      packageVersion: '2.0.0',
+      receiptId: 'receipt-0002',
+    })
+
+    expect(fresh.phase).toBe('prepared')
+    expect(existsSync(join(dirname(target.statePath), 'backups', sealed.transactionId))).toBe(false)
+    expect(warnings.some(message => message.includes('discarding stale'))).toBe(true)
+  })
+
+  it('begin refuses an active prepared transaction and keeps its preimages intact', async () => {
+    const target = fixture()
+    const origin = store(target)
+    const prepared = await origin.begin({
+      packageName: 'plugin-a',
+      packageVersion: '1.0.0',
+      receiptId: 'receipt-0001',
+    })
+    const backupDir = join(dirname(target.statePath), 'backups', prepared.transactionId)
+
+    const warnings: string[] = []
+    const next = store(target, 'generation-0002', { warn: message => warnings.push(message) })
+    await expect(next.begin({
+      packageName: 'plugin-b',
+      packageVersion: '2.0.0',
+      receiptId: 'receipt-0002',
+    })).rejects.toThrow('another plugin install recovery transaction is pending (phase prepared')
+    expect(existsSync(target.statePath)).toBe(true)
+    expect(existsSync(backupDir)).toBe(true)
+    expect(warnings).toEqual([])
+  })
+
+  it('claim discards a profile-mismatched stale transaction instead of deferring forever', async () => {
+    const target = fixture()
+    const desktop = store(target)
+    const sealed = await desktop.begin({
+      packageName: 'plugin-a',
+      packageVersion: '1.0.0',
+      receiptId: 'receipt-0001',
+    })
+    writePostinstall(target)
+    await desktop.seal(sealed.transactionId)
+
+    const webDir = join(target.root, 'profiles', 'web')
+    mkdirSync(webDir, { recursive: true })
+
+    const warnings: string[] = []
+    const web = store(target, 'generation-0002', {
+      profileName: 'web',
+      profileDir: webDir,
+      warn: message => warnings.push(message),
+    })
+    const claim = await web.claim()
+
+    expect(claim).toEqual({ action: 'none' })
+    expect(existsSync(target.statePath)).toBe(false)
+    expect(existsSync(join(dirname(target.statePath), 'backups', sealed.transactionId))).toBe(false)
+    expect(warnings.some(message => message.includes('discarding stale'))).toBe(true)
+  })
+
+  it('claim keeps deferring a profile-mismatched transaction that may still be active', async () => {
+    const target = fixture()
+    const desktop = store(target)
+    const prepared = await desktop.begin({
+      packageName: 'plugin-a',
+      packageVersion: '1.0.0',
+      receiptId: 'receipt-0001',
+    })
+
+    const webDir = join(target.root, 'profiles', 'web')
+    mkdirSync(webDir, { recursive: true })
+    const warnings: string[] = []
+    const web = store(target, 'generation-0002', {
+      profileName: 'web',
+      profileDir: webDir,
+      warn: message => warnings.push(message),
+    })
+    const claim = await web.claim()
+
+    expect(claim).toMatchObject({ action: 'deferred', reason: 'profile-mismatch' })
+    expect(existsSync(target.statePath)).toBe(true)
+    expect(existsSync(join(dirname(target.statePath), 'backups', prepared.transactionId))).toBe(true)
+    expect(warnings).toEqual([])
   })
 })
 
