@@ -16,11 +16,15 @@ The button performs a `POST` to the same-origin loopback route `DESKTOP_TERMINAL
 
 The client bundle declares `dsh-desktop` as a locale namespace with zh/en copy (`开启 DSH CLI` / `Open DSH CLI`) and waits on the official sidebar slot declaration through `ctx.slots.inject`. The package's `dsh.client.inject` list grows by `@deepseek-ai/dsh-client-locale` and `@deepseek-ai/dsh-client-ui-sidebar` so the Loader preloads the locale service and the sidebar slot owner.
 
+**Layout fix.** The upstream footer-actions container is a flex row designed for a single full-width action, so the second footer button shared the row and squeezed the market. A desktop-injected global rule keyed to the launcher's own `data-wide` marker stacks the two wide buttons vertically (CLI first, market below) by switching that container to `flex-direction: column`; the collapsed rail keeps both as inline icons. The `.dshCliLauncher` button styles mirror the market launcher's wide (full-width, 42px) and rail (36px circle) shapes.
+
 ## Alternatives considered
 
 **Expose the terminal through an existing client service.** Rejected: the desktop client deliberately has no renderer-to-Host RPC surface beyond the loopback HTTP routes used by boot health and the directory picker; a same-origin route is the established seam.
 
 **Reuse the tray-only command without a renderer entry.** Rejected: the request is explicitly for an in-sidebar launcher above the plugin market.
+
+**Anchor the stack rule on the upstream CSS-module class.** The compiled name (`hHd-Xa_footerActions`) still contains the `footerActions` fragment, so the rule uses `[class*="footerActions"]` scoped by `:has(.dshCliLauncher[data-wide="true"])`; the `data-wide` scope keeps the collapsed rail layout untouched and limits blast radius if upstream renames the class.
 
 ## Consequences
 
@@ -28,4 +32,4 @@ Both presentation modes show the launcher above the plugin market in the officia
 
 ## Verification
 
-New `desktop-cli-launcher-route.spec.ts` covers the success response, cross-origin and non-POST rejection, and the stable failure body. New `cli-launcher.spec.ts` covers the fetch contract, invalid/failed responses, icon-only versus labeled rendering, the glyph sizing, and the `sidebar.footer.action` registration (id, order, locale, label) through `installDesktopCliLauncher`; the spec stubs the two ui-primitives it consumes so it stays server-renderable. `plugin.spec.ts` gains a same-origin Host-route test that asserts `openTerminal()` is invoked. `package.spec.ts` asserts the extended `dsh.client.inject` list. `vitest.config.ts` inlines `@deepseek-ai/dsh-client-ui-primitives` so katex CSS imports inside that package transform instead of failing in the node environment. All four TypeScript compiler faces typecheck, the full desktop vitest suite passes (71 files, 678 tests), and the tsdown bundle build plus runtime-closure and CLI smokes stay green.
+New `desktop-cli-launcher-route.spec.ts` covers the success response, cross-origin and non-POST rejection, and the stable failure body. New `cli-launcher.spec.ts` covers the fetch contract, invalid/failed responses, icon-only versus labeled rendering, the glyph sizing, and the `sidebar.footer.action` registration (id, order, locale, label) through `installDesktopCliLauncher`; the spec stubs the two ui-primitives it consumes so it stays server-renderable. New `cli-launcher-styles.spec.ts` covers the stack rule and both button shapes in the injected CSS plus one-time style injection and disposal. `plugin.spec.ts` gains a same-origin Host-route test that asserts `openTerminal()` is invoked. `package.spec.ts` asserts the extended `dsh.client.inject` list. `vitest.config.ts` inlines `@deepseek-ai/dsh-client-ui-primitives` so katex CSS imports inside that package transform instead of failing in the node environment. All four TypeScript compiler faces typecheck, the full desktop vitest suite passes (73 files, 683 tests), and the tsdown bundle build plus runtime-closure and CLI smokes stay green.

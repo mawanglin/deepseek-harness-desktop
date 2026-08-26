@@ -16,6 +16,14 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => {
   }
 })
 
+// The launcher installs a style tag on registration; give the node
+// environment a minimal document so that effect runs in specs.
+vi.stubGlobal('document', {
+  head: { append: vi.fn() },
+  querySelector: vi.fn(() => null),
+  createElement: vi.fn(() => ({ dataset: {}, textContent: '', remove: vi.fn() })),
+})
+
 import {
   CliLauncher,
   CLI_LOCALE_NS,

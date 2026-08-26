@@ -16,9 +16,15 @@ desktop client 向官方 `sidebar.footer.action` 列表槽位贡献一个 **开�
 
 client bundle 把 `dsh-desktop` 注册为 locale namespace（zh/en 文案：`开启 DSH CLI` / `Open DSH CLI`），并通过 `ctx.slots.inject` 等待官方 sidebar 槽位声明。包的 `dsh.client.inject` 列表新增 `@deepseek-ai/dsh-client-locale` 与 `@deepseek-ai/dsh-client-ui-sidebar`，让 Loader 预加载 locale service 与 sidebar 槽位 owner。
 
+**排版修复。** 上游 footer-actions 容器是按单个全宽按钮设计的 flex 行，因此第二个 footer 按钮会与之并排并挤压插件市场。desktop 注入的全局规则以启动器自身的 `data-wide` marker 为锚点，通过 `:has()` 把该容器切换为 `flex-direction: column`，让宽模式下的两个按钮纵向堆叠（CLI 在上、市场在下）；收起 rail 仍保持两个内联图标。`.dshCliLauncher` 按钮样式与市场启动器对齐（宽模式全宽 42px，rail 36px 圆形）。
+
 ## Alternatives considered
 
 **通过既有 client service 暴露终端。** 已否决：desktop client 除 boot health 与目录选择器使用的 loopback HTTP 路由外，刻意没有 renderer 到 Host 的 RPC surface；同源路由是既定接缝。
+
+**只保留托盘命令、不加 renderer 入口。** 已否决：需求明确要求在插件市场之上的 sidebar 内提供启动器。
+
+**以上游 CSS-module 类为锚点。** 编译后的类名（`hHd-Xa_footerActions`）仍包含 `footerActions` 片段，因此规则使用 `[class*="footerActions"]` 并以 `:has(.dshCliLauncher[data-wide="true"])` 限定作用域；`data-wide` 作用域保持收起 rail 布局不变，并在上游改名时把影响面限制在最小。
 
 **只保留托盘命令、不加 renderer 入口。** 已否决：需求明确要求在插件市场之上的 sidebar 内提供启动器。
 
@@ -28,4 +34,4 @@ client bundle 把 `dsh-desktop` 注册为 locale namespace（zh/en 文案：`开
 
 ## Verification
 
-新增 `desktop-cli-launcher-route.spec.ts` 覆盖成功响应、跨源与非 POST 拒绝、稳定失败响应体。新增 `cli-launcher.spec.ts` 覆盖 fetch 契约、无效/失败响应、仅图标与带标签渲染、图标尺寸，以及 `installDesktopCliLauncher` 的 `sidebar.footer.action` 注册（id、order、locale、label）；该 spec stub 掉它消费的两个 ui-primitives，保持可服务端渲染。`plugin.spec.ts` 新增同源 Host 路由测试，断言 `openTerminal()` 被调用。`package.spec.ts` 断言扩展后的 `dsh.client.inject` 列表。`vitest.config.ts` 内联 `@deepseek-ai/dsh-client-ui-primitives`，让该包内的 katex CSS import 在 node 环境中转换而非失败。四个 TypeScript 编译面全部通过 typecheck，桌面 vitest 全量套件通过（71 个文件、678 个测试），tsdown bundle 构建与 runtime-closure、CLI 冒烟均保持绿色。
+新增 `desktop-cli-launcher-route.spec.ts` 覆盖成功响应、跨源与非 POST 拒绝、稳定失败响应体。新增 `cli-launcher.spec.ts` 覆盖 fetch 契约、无效/失败响应、仅图标与带标签渲染、图标尺寸，以及 `installDesktopCliLauncher` 的 `sidebar.footer.action` 注册（id、order、locale、label）；该 spec stub 掉它消费的两个 ui-primitives，保持可服务端渲染。新增 `cli-launcher-styles.spec.ts` 覆盖注入 CSS 中的堆叠规则与两种按钮形状，以及一次性注入与移除。`plugin.spec.ts` 新增同源 Host 路由测试，断言 `openTerminal()` 被调用。`package.spec.ts` 断言扩展后的 `dsh.client.inject` 列表。`vitest.config.ts` 内联 `@deepseek-ai/dsh-client-ui-primitives`，让该包内的 katex CSS import 在 node 环境中转换而非失败。四个 TypeScript 编译面全部通过 typecheck，桌面 vitest 全量套件通过（73 个文件、683 个测试），tsdown bundle 构建与 runtime-closure、CLI 冒烟均保持绿色。

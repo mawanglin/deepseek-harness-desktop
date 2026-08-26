@@ -1,5 +1,5 @@
 # Bilingual-pair consistency record: the git blob hash of each side as of the last
 # confirmed-consistent state. Both languages carry equal authority. Update both files
 # and re-record their hashes with git hash-object after editing either side.
-2026-08-26-desktop-sidebar-cli-launcher.md: bc1c183b0f0c3c3f199321d40dbdf41b5d8dcddb
-2026-08-26-desktop-sidebar-cli-launcher.zh.md: b1d91748ad23dfd1cd746107a0488603fe258757
+2026-08-26-desktop-sidebar-cli-launcher.md: 4db83ac960d222c995b7a34f2e4ad9d0b0ff1b27
+2026-08-26-desktop-sidebar-cli-launcher.zh.md: 914375d530ae0f3a3a61f1e973dde0371a78dd89

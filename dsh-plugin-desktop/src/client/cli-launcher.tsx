@@ -11,6 +11,7 @@ import {
   DESKTOP_TERMINAL_OPEN_PATH,
   type DesktopTerminalOpenResponse,
 } from '../desktop-cli-launcher-contract.ts'
+import { installCliLauncherStyles } from './cli-launcher-styles.ts'
 
 /** Locale namespace owned by the desktop CLI launcher. */
 export const CLI_LOCALE_NS = 'dsh-desktop'
@@ -109,6 +110,10 @@ export function installDesktopCliLauncher(ctx: ClientContext): void {
   ctx.effect(
     () => ctx.locale.register(CLI_LOCALE_NS, { zh, en }),
     'dsh-desktop: CLI launcher dictionaries',
+  )
+  ctx.effect(
+    () => installCliLauncherStyles(),
+    'dsh-desktop: CLI launcher styles',
   )
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
