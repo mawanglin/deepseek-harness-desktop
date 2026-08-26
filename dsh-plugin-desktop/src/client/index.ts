@@ -5,8 +5,11 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // The desktop client does not load or register a settings surface.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
+// Type convergence only: the official sidebar declares the footer-action slot.
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
 import { startRendererBootReporter } from './boot-health.ts'
+import { installDesktopCliLauncher } from './cli-launcher.tsx'
 import { installDesktopDirectoryPickerBridge, requestDesktopDirectoryValidation } from './directory-picker.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { installWorkspaceFolderDrop } from './workspace-folder-drop.ts'
@@ -28,6 +31,7 @@ export const inject = [
   'sessions',
   'theme',
   'workspaces',
+  'locale',
 ]
 
 /** Register desktop-owned client surfaces for the current BrowserWindow mode. @param ctx - browser Cordis context. */
@@ -48,6 +52,7 @@ export function apply(ctx: ClientContext): void {
     }),
     'dsh-plugin-desktop: workspace folder drop',
   )
+  installDesktopCliLauncher(ctx)
   if (environment.platform === 'win32') {
     ctx.effect(
       () => installDesktopDirectoryPickerBridge(),

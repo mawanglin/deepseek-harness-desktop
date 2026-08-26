@@ -53,6 +53,8 @@ Linux 只支持兼容模式。其托盘模式命令会被禁用，advanced 值�
 
 desktop Client module 会校验模式与平台 marker，随后在兼容模式下不产生任何呈现替换。它不提供或替换 `layout` service，不注册 `root` 或 `sidebar` occupant，也不改动 conversation surface。Desktop 自有的启动健康报告和本地文件夹拖放属于能力 effect；兼容模式仍会保留被选 profile 自身的 layout、sidebar 与 conversation 组合，普通 `desktop` 与 `web` profile 因而会原样保留官方 row。
 
+两种呈现模式还会在官方 sidebar 中贡献一个 **开启 DSH CLI** footer action，位于插件市场上方并带终端图标。点击后通过同源 loopback 路由请求 desktop Host 为当前激活 profile 打开隔离的 DSH 终端，无需离开应用即可使用打包的 `dsh`、`pnpm` 与 `node` shim；与托盘命令一样，终端不可用时会在原生错误对话框中报告。
+
 Cordis row 会在 profile 激活期间登记原生窗口参数。Launcher 只在 `app-boot` 完成并审计整个 profile 后创建窗口，因此首个 renderer manifest 会包含所有已激活的官方、desktop 与第三方 client plugin，同时插件自身不会在 Loader entry 内等待整棵 Loader tree。
 
 在 Windows 上，Launcher 会固定使用 browse 目录选择 backend，并保留完整的应用内目录面板。桌面构建通过补丁在该面板中加入一个小型系统文件夹图标；图标经同源路由调用 Electron 的 `dialog.showOpenDialog`，选中的路径继续进入面板原有的 workspace 接纳流程，取消后面板保持打开。普通浏览器与远程启动不会获得这个桌面桥接。macOS 与 Linux 仍使用上游自适应 chooser。

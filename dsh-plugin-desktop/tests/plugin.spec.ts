@@ -20,6 +20,7 @@ import {
   DESKTOP_DIRECTORY_PICKER_PATH,
   DESKTOP_DIRECTORY_VALIDATOR_PATH,
 } from '../src/directory-picker-contract.ts'
+import { DESKTOP_TERMINAL_OPEN_PATH } from '../src/desktop-cli-launcher-contract.ts'
 import type { DesktopRuntime, DesktopShellSpec } from '../src/runtime.ts'
 import { RENDERER_BOOT_REPORT_PATH, type RendererBootReport } from '../src/renderer-boot-contract.ts'
 
@@ -45,6 +46,7 @@ interface PluginHarness {
   rendererBoot: ReturnType<typeof vi.fn<(report: RendererBootReport) => void>>
   pickDirectory: ReturnType<typeof vi.fn<() => Promise<string | null>>>
   validateDirectory: ReturnType<typeof vi.fn<(path: string) => Promise<boolean>>>
+  openTerminal: ReturnType<typeof vi.fn<() => void>>
   route(path: string): WebRoute | undefined
   notify(next: DesktopSettings, prev: DesktopSettings): Promise<void>
   notifyLocale(preference: LocaleId | undefined): void
@@ -61,6 +63,7 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
   const rendererBoot = vi.fn<(report: RendererBootReport) => void>()
   const pickDirectory = vi.fn(async () => null)
   const validateDirectory = vi.fn(async () => true)
+  const openTerminal = vi.fn<() => void>(() => {})
   const routes = new Map<string, WebRoute>()
   const settingsUpdated = new Set<(namespace: unknown, next: unknown) => void>()
   let localePreference: LocaleId | undefined
@@ -87,7 +90,7 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
     show: () => {},
     notifyAttention: () => {},
     registerTrayItem: () => ({ refresh: () => {}, dispose: () => {} }),
-    openTerminal: () => {},
+    openTerminal,
     exportDiagnostics: async () => {},
     pickDirectory,
     validateDirectory,
@@ -143,6 +146,7 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
     rendererBoot,
     pickDirectory,
     validateDirectory,
+    openTerminal,
     route: path => routes.get(path),
     notify: async (next, prev) => { await watcher?.(next, prev) },
     notifyLocale: (preference) => {
@@ -257,6 +261,32 @@ describe('desktop Host plugin', () => {
 
     expect(harness.rendererBoot).toHaveBeenCalledWith(report)
     expect(res.statusCode).toBe(204)
+  })
+
+  it('opens the DSH CLI terminal from a same-origin renderer route', async () => {
+    const harness = createHarness()
+    apply(harness.ctx, config)
+    const route = harness.route(DESKTOP_TERMINAL_OPEN_PATH)
+    expect(route).toEqual(expect.objectContaining({
+      kind: 'exact',
+      path: DESKTOP_TERMINAL_OPEN_PATH,
+    }))
+    const req = {
+      method: 'POST',
+      headers: { origin: 'http://127.0.0.1:43120' },
+    } as unknown as IncomingMessage
+    let body = ''
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn((value?: string) => { body = value ?? '' }),
+    } as unknown as ServerResponse
+
+    await route?.handler(req, res)
+
+    expect(harness.openTerminal).toHaveBeenCalledOnce()
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(body)).toEqual({ opened: true })
   })
 
   it('serves the Windows native picker through a same-origin desktop route', async () => {

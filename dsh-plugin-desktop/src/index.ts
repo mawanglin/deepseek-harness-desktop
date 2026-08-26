@@ -26,6 +26,8 @@ import {
   handleDesktopDirectoryPickerRequest,
   handleDesktopDirectoryValidationRequest,
 } from './directory-picker-route.ts'
+import { DESKTOP_TERMINAL_OPEN_PATH } from './desktop-cli-launcher-contract.ts'
+import { handleDesktopTerminalOpenRequest } from './desktop-cli-launcher-route.ts'
 import type { DesktopShellMode } from './runtime.ts'
 import type {} from './runtime.ts'
 
@@ -158,6 +160,22 @@ export function apply(ctx: Context, config: Config): void {
       ),
     }),
     'dsh-plugin-desktop: renderer boot report route',
+  )
+  ctx.effect(
+    () => ctx.webServer.register({
+      kind: 'exact',
+      path: DESKTOP_TERMINAL_OPEN_PATH,
+      handler: (req, res) => handleDesktopTerminalOpenRequest(
+        req,
+        res,
+        rendererOrigin,
+        () => { runtime.openTerminal() },
+        cause => {
+          ctx.logger.error(`dsh-plugin-desktop: failed to open the desktop terminal from the renderer: ${cause instanceof Error ? cause.message : String(cause)}`)
+        },
+      ),
+    }),
+    'dsh-plugin-desktop: desktop terminal open route',
   )
   if (runtime.platform === 'win32') {
     ctx.effect(
