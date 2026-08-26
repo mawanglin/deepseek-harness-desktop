@@ -63,6 +63,10 @@
       "types": "./lib/types/diagnostics.d.ts",
       "default": "./lib/diagnostics.js"
     },
+    "./install-recovery-tray": {
+      "types": "./lib/types/install-recovery-tray.d.ts",
+      "default": "./lib/install-recovery-tray.js"
+    },
     "./notifications": {
       "types": "./lib/types/notifications.d.ts",
       "default": "./lib/notifications.js"

@@ -1,0 +1,5 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the last
+# confirmed-consistent state. Both languages carry equal authority. Update both files
+# and re-record their hashes with git hash-object after editing either side.
+2026-08-26-install-recovery-tray-resolve.md: d644efb857146b6e5c8178bb50860ef69b2e7453
+2026-08-26-install-recovery-tray-resolve.zh.md: 238866ee2345e0434c43e76751e178af5deaa202

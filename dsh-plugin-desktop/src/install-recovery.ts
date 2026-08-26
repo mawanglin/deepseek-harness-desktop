@@ -180,7 +180,7 @@ function sha256(bytes: Uint8Array | string): string {
  * would otherwise block every later install forever. Earlier phases may still
  * have a running pnpm or an in-flight recovery and are never discarded.
  */
-function isStaleDiscardablePhase(phase: DesktopInstallRecoveryPhase): boolean {
+export function isStaleDiscardablePhase(phase: DesktopInstallRecoveryPhase): boolean {
   return phase === 'awaiting-restart' || phase === 'verified' || phase === 'rolled-back'
 }
 
@@ -485,6 +485,22 @@ export class DesktopInstallRecoveryStore {
     )
     await unlink(this.statePath)
     await rm(this.backupDirectory(state.transactionId), { recursive: true, force: true })
+  }
+
+  /**
+   * Discard the pending transaction when it is in a stale discardable phase,
+   * under the mutation lock. Never touches profile files. Used by the
+   * one-click recovery flow to unblock installs.
+   * @returns the discarded transaction, or undefined when nothing is pending
+   * or the pending phase is not discardable.
+   */
+  async discardStalePending(): Promise<DesktopInstallRecoveryTransaction | undefined> {
+    return await this.withMutationLock(async () => {
+      const state = await this.read()
+      if (state === undefined || !isStaleDiscardablePhase(state.phase)) return undefined
+      await this.discardStale(state)
+      return state
+    })
   }
 
   /** Seal exact post-install hashes before exposing success or a restart grant. */

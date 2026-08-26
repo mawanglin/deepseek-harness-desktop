@@ -9,11 +9,21 @@ import {
   shell,
 } from 'electron'
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
-import { desktopInstallRecoveryStatePath } from './install-recovery.ts'
+import {
+  DesktopInstallRecoveryStore,
+  desktopInstallRecoveryStatePath,
+  isStaleDiscardablePhase,
+  type DesktopInstallRecoveryTransaction,
+} from './install-recovery.ts'
+import {
+  resolvePendingInstallRecovery,
+  type DesktopInstallRecoveryResolveOutcome,
+} from './install-recovery-resolve.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import { ElectronShellGeneration } from './electron-shell-generation.ts'
 import { electronPlatformStrategy, type ElectronPlatformStrategy } from './electron-platform.ts'
@@ -331,6 +341,186 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     })
     this.diagnosticExport = operation
     return operation
+  }
+
+  /** @inheritdoc */
+  async resolveInstallRecovery(): Promise<void> {
+    const spec = this.terminalSpec
+    if (spec === undefined) {
+      this.logError('dsh-plugin-desktop: terminal profile is not configured; cannot resolve install recovery')
+      return
+    }
+    const zh = this.locale === 'zh'
+    const statePath = desktopInstallRecoveryStatePath(app.getPath('userData'))
+    const store = new DesktopInstallRecoveryStore({
+      statePath,
+      profileName: spec.profileName,
+      profileDir: spec.profileDir,
+      generationId: `runtime:${randomUUID()}`,
+    })
+    let state: DesktopInstallRecoveryTransaction | undefined
+    try {
+      state = await store.read()
+    } catch (cause) {
+      this.reportInstallRecoveryError(cause)
+      return
+    }
+    if (state === undefined) {
+      await dialog.showMessageBox({
+        type: 'info',
+        title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+        message: zh ? '没有需要修复的插件安装事务。' : 'There is no plugin install transaction to resolve.',
+        buttons: ['OK'],
+        defaultId: 0,
+        noLink: true,
+      })
+      return
+    }
+    const description = `${state.packageName}@${state.packageVersion} (phase ${state.phase}, profile ${state.profileName})`
+    if (isStaleDiscardablePhase(state.phase)) {
+      const confirmed = await dialog.showMessageBox({
+        type: 'warning',
+        title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+        message: zh ? '发现未完成的插件安装事务。' : 'An unfinished plugin install transaction was found.',
+        detail: zh
+          ? `${description}。该事务已无活动进程，清除不会改动任何文件。`
+          : `${description}. No live process owns it; clearing it changes no files.`,
+        buttons: zh ? ['清除事务', '取消'] : ['Clear Transaction', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      })
+      if (confirmed.response !== 0) return
+      await this.runInstallRecoveryResolution(zh)
+      return
+    }
+    if (state.phase === 'verifying' || !state.createdByGeneration.startsWith('terminal:')) {
+      await dialog.showMessageBox({
+        type: 'info',
+        title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+        message: zh ? '该安装事务可能仍在进行。' : 'This install transaction may still be in progress.',
+        detail: zh
+          ? `${description}。请稍后再试，或重启 DSH Desktop。`
+          : `${description}. Please try again later, or restart DSH Desktop.`,
+        buttons: ['OK'],
+        defaultId: 0,
+        noLink: true,
+      })
+      return
+    }
+    const confirmed = await dialog.showMessageBox({
+      type: 'warning',
+      title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+      message: zh ? '发现被中断的插件安装。' : 'An interrupted plugin install was found.',
+      detail: zh
+        ? `${description}。恢复会把 profile 配置文件还原到安装前状态（不删除已安装的 node_modules）。`
+        : `${description}. Restoring returns the profile configuration files to their pre-install state (installed node_modules are kept).`,
+      buttons: zh ? ['恢复安装前配置', '取消'] : ['Restore Pre-install Configuration', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    })
+    if (confirmed.response !== 0) return
+    await this.runInstallRecoveryResolution(zh)
+  }
+
+  /** Resolve the pending transaction and present the outcome to the user. */
+  private async runInstallRecoveryResolution(zh: boolean): Promise<void> {
+    const spec = this.terminalSpec
+    if (spec === undefined) return
+    let outcome: DesktopInstallRecoveryResolveOutcome
+    try {
+      outcome = await resolvePendingInstallRecovery({
+        statePath: desktopInstallRecoveryStatePath(app.getPath('userData')),
+        homeDir: spec.homeDir,
+        activeProfileName: spec.profileName,
+        activeProfileDir: spec.profileDir,
+      })
+    } catch (cause) {
+      this.reportInstallRecoveryError(cause)
+      return
+    }
+    const statePath = desktopInstallRecoveryStatePath(app.getPath('userData'))
+    switch (outcome.status) {
+      case 'none':
+        await dialog.showMessageBox({
+          type: 'info',
+          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+          message: zh ? '没有需要修复的插件安装事务。' : 'There is no plugin install transaction to resolve.',
+          buttons: ['OK'],
+          defaultId: 0,
+          noLink: true,
+        })
+        return
+      case 'cleared':
+        await dialog.showMessageBox({
+          type: 'info',
+          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+          message: zh ? '已清除陈旧的安装事务。' : 'The stale install transaction was cleared.',
+          detail: zh ? '可以直接重新执行 dsh plugin add。' : 'You can run dsh plugin add again.',
+          buttons: ['OK'],
+          defaultId: 0,
+          noLink: true,
+        })
+        return
+      case 'restored':
+        await dialog.showMessageBox({
+          type: 'info',
+          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+          message: zh ? '已恢复安装前配置。' : 'The pre-install configuration was restored.',
+          detail: zh ? '建议重启 DSH Desktop 后重试安装。' : 'Restart DSH Desktop before installing again.',
+          buttons: ['OK'],
+          defaultId: 0,
+          noLink: true,
+        })
+        return
+      case 'manual-recovery-required':
+        await dialog.showMessageBox({
+          type: 'warning',
+          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+          message: zh ? '配置文件被外部修改，无法自动恢复。' : 'Profile files were modified externally; automatic recovery is not possible.',
+          detail: zh
+            ? `涉及文件：${outcome.mismatchedFiles.join(', ')}。请手动处理 ${statePath}。`
+            : `Affected files: ${outcome.mismatchedFiles.join(', ')}. Repair ${statePath} manually.`,
+          buttons: ['OK'],
+          defaultId: 0,
+          noLink: true,
+        })
+        return
+      case 'still-active':
+        await dialog.showMessageBox({
+          type: 'info',
+          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+          message: zh ? '该安装事务可能仍在进行。' : 'This install transaction may still be in progress.',
+          detail: zh ? '请稍后再试，或重启 DSH Desktop。' : 'Please try again later, or restart DSH Desktop.',
+          buttons: ['OK'],
+          defaultId: 0,
+          noLink: true,
+        })
+        return
+      case 'failed':
+        await dialog.showMessageBox({
+          type: 'error',
+          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
+          message: zh ? '无法修复安装事务。' : 'Could not resolve the install transaction.',
+          detail: outcome.message,
+          buttons: ['OK'],
+          defaultId: 0,
+          noLink: true,
+        })
+        return
+    }
+  }
+
+  /** Keep one-click install-recovery failures visible in a packaged GUI process. */
+  private reportInstallRecoveryError(cause: unknown): void {
+    const error = cause instanceof Error ? cause : new Error(String(cause))
+    this.logError(`dsh-plugin-desktop: failed to resolve plugin install recovery: ${error.message}`)
+    try {
+      dialog.showErrorBox('Unable to Resolve Plugin Install', error.message)
+    } catch (dialogCause) {
+      this.logError(`dsh-plugin-desktop: failed to show install recovery error: ${dialogCause instanceof Error ? dialogCause.message : String(dialogCause)}`)
+    }
   }
 
   private async performDiagnosticExport(): Promise<void> {
