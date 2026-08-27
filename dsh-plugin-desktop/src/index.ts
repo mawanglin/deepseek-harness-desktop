@@ -299,22 +299,6 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(
     () => ctx.webServer.register({
       kind: 'exact',
-      path: DESKTOP_TERMINAL_OPEN_PATH,
-      handler: (req, res) => handleDesktopTerminalOpenRequest(
-        req,
-        res,
-        rendererOrigin,
-        () => { runtime.openTerminal() },
-        cause => {
-          ctx.logger.error(`dsh-plugin-desktop: failed to open the desktop terminal from the renderer: ${cause instanceof Error ? cause.message : String(cause)}`)
-        },
-      ),
-    }),
-    'dsh-plugin-desktop: desktop terminal open route',
-  )
-  ctx.effect(
-    () => ctx.webServer.register({
-      kind: 'exact',
       path: CLI_LAUNCHER_TERMINAL_OPEN_PATH,
       handler: (req, res) => handleCliLauncherTerminalOpenRequest(
         req,
