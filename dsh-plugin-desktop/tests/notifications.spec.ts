@@ -165,13 +165,14 @@ function userMessage(source: 'user' | 'plugin', seq: number): SessionEvent<'user
 }
 
 describe('desktop notifications Host plugin', () => {
-  it('registers four live settings with notifications enabled by default', () => {
+  it('registers live notification settings with the global switch enabled by default', () => {
     const harness = createHarness(['settings'])
 
     expect(name).toBe('desktop-notifications')
     expect(inject).toEqual(['desktopRuntime'])
     expect(String(DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE)).toBe('dsh-desktop-notifications')
     expect(DesktopNotificationSettingsSchema({} as DesktopNotificationSettings)).toEqual({
+      enabled: true,
       notifyOnTurnCompletion: true,
       notifyOnTurnFailure: true,
       notifyOnJobCompletion: true,
@@ -204,7 +205,7 @@ describe('desktop notifications Host plugin', () => {
 
     expect(harness.notifyAttention.mock.calls).toEqual([
       [{ title: 'Background Job Completed', body: 'A background job has finished.' }],
-      [{ title: 'Background Job Failed', body: 'A background job needs attention.' }],
+      [{ title: 'Background Job Failed', body: 'A background job could not finish. Open DSH Desktop for details.' }],
     ])
     expect(JSON.stringify(harness.notifyAttention.mock.calls)).not.toMatch(/Users|private|secret|session-123/u)
   })
@@ -222,6 +223,7 @@ describe('desktop notifications Host plugin', () => {
     } satisfies JobSnapshot
 
     await harness.updateSettings({
+      enabled: true,
       notifyOnTurnCompletion: false,
       notifyOnTurnFailure: true,
       notifyOnJobCompletion: false,
@@ -242,9 +244,38 @@ describe('desktop notifications Host plugin', () => {
     }, 6))
 
     expect(harness.notifyAttention.mock.calls).toEqual([
-      [{ title: 'Background Job Failed', body: 'A background job needs attention.' }],
-      [{ title: 'User Turn Failed', body: 'A direct user turn needs attention.' }],
+      [{ title: 'Background Job Failed', body: 'A background job could not finish. Open DSH Desktop for details.' }],
+      [{ title: 'User Turn Failed', body: 'A user-initiated turn could not finish. Open DSH Desktop for details.' }],
     ])
+  })
+
+  it('keeps fine-grained choices while the live global switch is disabled', async () => {
+    const harness = createHarness()
+    const snapshot = {
+      id: 'bash-disabled' as JobId,
+      kind: 'bash',
+      label: 'build',
+      status: 'completed',
+      startedAt: 1,
+      finishedAt: 2,
+      reported: false,
+    } satisfies JobSnapshot
+
+    await harness.updateSettings({
+      enabled: false,
+      notifyOnTurnCompletion: true,
+      notifyOnTurnFailure: true,
+      notifyOnJobCompletion: true,
+      notifyOnJobFailure: true,
+    })
+    await harness.jobDone(snapshot)
+
+    const active = session('disabled')
+    await harness.sessionEvent(active, event('turn/start', { turn: 1 }, 1))
+    await harness.sessionEvent(active, userMessage('user', 2))
+    await harness.sessionEvent(active, event('turn/end', { turn: 1, reason: { kind: 'completed' } }, 3))
+
+    expect(harness.notifyAttention).not.toHaveBeenCalled()
   })
 
   it('notifies only matching direct-user turn endings', async () => {
@@ -268,8 +299,8 @@ describe('desktop notifications Host plugin', () => {
 
     expect(harness.notifyAttention).toHaveBeenCalledOnce()
     expect(harness.notifyAttention).toHaveBeenCalledWith({
-      title: 'Turn Completed',
-      body: 'A direct user turn has finished.',
+      title: 'User Turn Completed',
+      body: 'A user-initiated turn has finished.',
     })
   })
 
@@ -293,7 +324,7 @@ describe('desktop notifications Host plugin', () => {
     expect(harness.notifyAttention).toHaveBeenCalledOnce()
     expect(harness.notifyAttention).toHaveBeenCalledWith({
       title: 'User Turn Failed',
-      body: 'A direct user turn needs attention.',
+      body: 'A user-initiated turn could not finish. Open DSH Desktop for details.',
     })
   })
 

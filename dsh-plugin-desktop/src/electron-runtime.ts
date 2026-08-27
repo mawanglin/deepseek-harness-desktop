@@ -9,21 +9,11 @@ import {
   shell,
 } from 'electron'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
-import {
-  DesktopInstallRecoveryStore,
-  desktopInstallRecoveryStatePath,
-  isStaleDiscardablePhase,
-  type DesktopInstallRecoveryTransaction,
-} from './install-recovery.ts'
-import {
-  resolvePendingInstallRecovery,
-  type DesktopInstallRecoveryResolveOutcome,
-} from './install-recovery-resolve.ts'
+import { showDesktopMessageBox } from './desktop-dialog-window.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import { ElectronShellGeneration } from './electron-shell-generation.ts'
 import { electronPlatformStrategy, type ElectronPlatformStrategy } from './electron-platform.ts'
@@ -52,6 +42,7 @@ import { exportDesktopDiagnostics } from './diagnostic-export.ts'
 import {
   desktopDiagnosticsPrivacyCopy,
   desktopLocaleFromLanguageTag,
+  desktopRestartConfirmationCopy,
   desktopTrayLabel,
 } from './tray-locale.ts'
 import {
@@ -63,21 +54,31 @@ import {
   type DesktopUpdateArtifact,
 } from './update-download.ts'
 import type { UpdateCheckResult } from './update-checker.ts'
+import type { DesktopInstallationId } from './desktop-installation-id.ts'
 import {
   type WindowsVolumeQuery,
 } from './windows-volume-diagnostics.ts'
 import { ElectronWorkspaceAdmission } from './workspace-admission.ts'
+import { ProfileCreateWindow, type ProfileCreateWindowOptions } from './profile-create-window.ts'
+import { windowsBuildNumber } from './window-material.ts'
+import { desktopNativeCopy } from './native-dialog-copy.ts'
+import {
+  FileMainWindowStateStore,
+  type MainWindowStateStore,
+} from './main-window-state.ts'
 
 /** Return the presentation mode opposite the active generation. */
 export function nextDesktopShellMode(mode: DesktopShellSpec['mode']): DesktopShellSpec['mode'] {
-  return mode === 'compatibility' ? 'advanced' : 'compatibility'
+  if (mode === 'compatibility') return 'extended'
+  if (mode === 'extended') return 'advanced'
+  return 'compatibility'
 }
 
 /** Return the tray command describing the mode that will be activated. */
 export function modeToggleLabel(mode: DesktopShellSpec['mode'], locale: DesktopLocale = 'en'): string {
-  return mode === 'compatibility'
-    ? desktopTrayLabel(locale, 'switchToAdvanced')
-    : desktopTrayLabel(locale, 'switchToCompatibility')
+  if (mode === 'compatibility') return desktopTrayLabel(locale, 'switchToExtended')
+  if (mode === 'extended') return desktopTrayLabel(locale, 'switchToAdvanced')
+  return desktopTrayLabel(locale, 'switchToCompatibility')
 }
 
 /**
@@ -106,6 +107,7 @@ export const RENDERER_BOOT_TIMEOUT_MS = 30_000
 /** Native adapter used by the DSH Desktop launcher and owned by its Cordis shell plugin. */
 export class ElectronDesktopRuntime implements DesktopRuntime {
   readonly platform: DesktopPlatform
+  readonly windowsBuild: number | undefined
   private readonly platformStrategy: ElectronPlatformStrategy
   readonly updates: DesktopUpdateAdapter
 
@@ -120,15 +122,20 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private readonly workspaceAdmission: ElectronWorkspaceAdmission
   private updateCleanupTask: Promise<void> | undefined
   private rendererHealthGate: DesktopRendererHealthGate | undefined
+  private profileCreateWindow: ProfileCreateWindow | undefined
+  private restartRequest: Promise<void> | undefined
 
   constructor(
-    private readonly restart: () => Promise<void>,
+    private readonly restart: (target?: 'recovery') => Promise<void>,
     private readonly onRendererBoot: (report: RendererBootReport) => boolean | void = () => {},
     private readonly logger: DesktopLogger | undefined = undefined,
     workspaceVolumeQuery: WindowsVolumeQuery | undefined = undefined,
+    private readonly mainWindowState: MainWindowStateStore = new FileMainWindowStateStore(app.getPath('userData')),
+    installationId?: DesktopInstallationId,
   ) {
     this.platformStrategy = electronPlatformStrategy()
     this.platform = this.platformStrategy.platform
+    this.windowsBuild = this.platform === 'win32' ? windowsBuildNumber() : undefined
     const platformStrategy = this.platformStrategy
     this.workspaceAdmission = new ElectronWorkspaceAdmission({
       platform: this.platform,
@@ -137,7 +144,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       showOpenDialog: async options => this.generation === undefined
         ? await dialog.showOpenDialog(options)
         : await this.generation.showOpenDialog(options),
-      showMessageBox: async options => await dialog.showMessageBox(options),
+      showMessageBox: async options => await this.showDesktopMessageBox(options),
       logError: message => { this.logError(message) },
       ...(workspaceVolumeQuery === undefined ? {} : { volumeQuery: workspaceVolumeQuery }),
     })
@@ -146,6 +153,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       get canDownload() { return app.isPackaged && platformStrategy.updateDownloadPlatform !== undefined },
       get currentVersion() { return PRODUCT_VERSION },
       get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
+      ...(installationId === undefined ? {} : { installationId }),
       request: (url, init) => net.fetch(url, init),
       confirmDownload: version => this.confirmUpdateDownload(version),
       showManualCheckResult: result => this.showManualUpdateCheckResult(result),
@@ -206,12 +214,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         await this.mountTask
       } finally {
         try {
+          this.profileCreateWindow?.close()
+          this.profileCreateWindow = undefined
           await this.generation?.release()
         } finally {
           this.generation = undefined
           this.mountTask = undefined
           if (this.scheduled === spec) {
-            if (spec.mode === 'advanced') nativeTheme.themeSource = previousThemeSource
+            if (this.platform !== 'linux') nativeTheme.themeSource = previousThemeSource
             this.scheduled = undefined
           }
         }
@@ -231,12 +241,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         platform: this.platformStrategy,
         spec,
         preloadPath: desktopPreloadPath(),
+        buildApplicationMenuItems: () => this.buildApplicationMenuItems(),
         isQuitting: () => this.quitting,
         buildTrayTemplate: () => this.buildTrayTemplate(spec),
         stopRendererBootMonitoring: () => { this.stopRendererBootMonitoring() },
         abortRendererBootMonitoring: cause => { this.rendererHealthGate?.stop(cause) },
         failRendererBoot: error => { this.failRendererBoot('renderer-failed', error) },
         logError: message => { this.logError(message) },
+        mainWindowState: this.mainWindowState,
       })
       this.generation = generation
       this.mountTask = generation.mount(beforeInteractive).then(() => {
@@ -273,20 +285,35 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   }
 
   /** @inheritdoc */
+  openProfileCreateWindow(options: Omit<ProfileCreateWindowOptions, 'locale'>): void {
+    if (this.profileCreateWindow === undefined) {
+      this.profileCreateWindow = new ProfileCreateWindow({
+        ...options,
+        locale: this.locale,
+      })
+    }
+    this.profileCreateWindow.open()
+  }
+
+  /** @inheritdoc */
   registerTrayItem(item: DesktopTrayItem): DesktopTrayItemRegistration {
     const key = Symbol()
     this.trayItems.set(key, item)
     this.rebuildTrayMenu()
+    this.rebuildApplicationMenu()
     let active = true
     return {
       refresh: () => {
-        if (active) this.rebuildTrayMenu()
+        if (!active) return
+        this.rebuildTrayMenu()
+        this.rebuildApplicationMenu()
       },
       dispose: () => {
         if (!active) return
         active = false
         this.trayItems.delete(key)
         this.rebuildTrayMenu()
+        this.rebuildApplicationMenu()
       },
     }
   }
@@ -323,7 +350,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         productVersion: PRODUCT_VERSION,
         profileDir: spec.profileDir,
         homeDir: spec.homeDir,
-        installRecoveryStatePath: desktopInstallRecoveryStatePath(app.getPath('userData')),
         stateDir: desktopTerminalStateDirectory(app.getPath('userData'), spec.profileName),
         spawn,
         onLaunchError: cause => { this.reportTerminalLaunchError(cause) },
@@ -331,6 +357,22 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     } catch (cause) {
       this.reportTerminalLaunchError(cause)
     }
+  }
+
+  /** @inheritdoc */
+  reloadRenderer(): void {
+    if (this.generation === undefined) {
+      throw new Error('dsh-plugin-desktop: renderer reload requires an active shell generation')
+    }
+    this.generation.reloadRenderer()
+  }
+
+  /** @inheritdoc */
+  toggleDeveloperTools(): void {
+    if (this.generation === undefined) {
+      throw new Error('dsh-plugin-desktop: Developer Tools require an active shell generation')
+    }
+    this.generation.toggleDeveloperTools()
   }
 
   /** @inheritdoc */
@@ -343,190 +385,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     return operation
   }
 
-  /** @inheritdoc */
-  async resolveInstallRecovery(): Promise<void> {
-    const spec = this.terminalSpec
-    if (spec === undefined) {
-      this.logError('dsh-plugin-desktop: terminal profile is not configured; cannot resolve install recovery')
-      return
-    }
-    const zh = this.locale === 'zh'
-    const statePath = desktopInstallRecoveryStatePath(app.getPath('userData'))
-    const store = new DesktopInstallRecoveryStore({
-      statePath,
-      profileName: spec.profileName,
-      profileDir: spec.profileDir,
-      generationId: `runtime:${randomUUID()}`,
-    })
-    let state: DesktopInstallRecoveryTransaction | undefined
-    try {
-      state = await store.read()
-    } catch (cause) {
-      this.reportInstallRecoveryError(cause)
-      return
-    }
-    if (state === undefined) {
-      await dialog.showMessageBox({
-        type: 'info',
-        title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-        message: zh ? '没有需要修复的插件安装事务。' : 'There is no plugin install transaction to resolve.',
-        buttons: ['OK'],
-        defaultId: 0,
-        noLink: true,
-      })
-      return
-    }
-    const description = `${state.packageName}@${state.packageVersion} (phase ${state.phase}, profile ${state.profileName})`
-    if (isStaleDiscardablePhase(state.phase)) {
-      const confirmed = await dialog.showMessageBox({
-        type: 'warning',
-        title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-        message: zh ? '发现未完成的插件安装事务。' : 'An unfinished plugin install transaction was found.',
-        detail: zh
-          ? `${description}。该事务已无活动进程，清除不会改动任何文件。`
-          : `${description}. No live process owns it; clearing it changes no files.`,
-        buttons: zh ? ['清除事务', '取消'] : ['Clear Transaction', 'Cancel'],
-        defaultId: 0,
-        cancelId: 1,
-        noLink: true,
-      })
-      if (confirmed.response !== 0) return
-      await this.runInstallRecoveryResolution(zh)
-      return
-    }
-    if (state.phase === 'verifying' || !state.createdByGeneration.startsWith('terminal:')) {
-      await dialog.showMessageBox({
-        type: 'info',
-        title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-        message: zh ? '该安装事务可能仍在进行。' : 'This install transaction may still be in progress.',
-        detail: zh
-          ? `${description}。请稍后再试，或重启 DSH Desktop。`
-          : `${description}. Please try again later, or restart DSH Desktop.`,
-        buttons: ['OK'],
-        defaultId: 0,
-        noLink: true,
-      })
-      return
-    }
-    const confirmed = await dialog.showMessageBox({
-      type: 'warning',
-      title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-      message: zh ? '发现被中断的插件安装。' : 'An interrupted plugin install was found.',
-      detail: zh
-        ? `${description}。恢复会把 profile 配置文件还原到安装前状态（不删除已安装的 node_modules）。`
-        : `${description}. Restoring returns the profile configuration files to their pre-install state (installed node_modules are kept).`,
-      buttons: zh ? ['恢复安装前配置', '取消'] : ['Restore Pre-install Configuration', 'Cancel'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-    })
-    if (confirmed.response !== 0) return
-    await this.runInstallRecoveryResolution(zh)
-  }
-
-  /** Resolve the pending transaction and present the outcome to the user. */
-  private async runInstallRecoveryResolution(zh: boolean): Promise<void> {
-    const spec = this.terminalSpec
-    if (spec === undefined) return
-    let outcome: DesktopInstallRecoveryResolveOutcome
-    try {
-      outcome = await resolvePendingInstallRecovery({
-        statePath: desktopInstallRecoveryStatePath(app.getPath('userData')),
-        homeDir: spec.homeDir,
-        activeProfileName: spec.profileName,
-        activeProfileDir: spec.profileDir,
-      })
-    } catch (cause) {
-      this.reportInstallRecoveryError(cause)
-      return
-    }
-    const statePath = desktopInstallRecoveryStatePath(app.getPath('userData'))
-    switch (outcome.status) {
-      case 'none':
-        await dialog.showMessageBox({
-          type: 'info',
-          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-          message: zh ? '没有需要修复的插件安装事务。' : 'There is no plugin install transaction to resolve.',
-          buttons: ['OK'],
-          defaultId: 0,
-          noLink: true,
-        })
-        return
-      case 'cleared':
-        await dialog.showMessageBox({
-          type: 'info',
-          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-          message: zh ? '已清除陈旧的安装事务。' : 'The stale install transaction was cleared.',
-          detail: zh ? '可以直接重新执行 dsh plugin add。' : 'You can run dsh plugin add again.',
-          buttons: ['OK'],
-          defaultId: 0,
-          noLink: true,
-        })
-        return
-      case 'restored':
-        await dialog.showMessageBox({
-          type: 'info',
-          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-          message: zh ? '已恢复安装前配置。' : 'The pre-install configuration was restored.',
-          detail: zh ? '建议重启 DSH Desktop 后重试安装。' : 'Restart DSH Desktop before installing again.',
-          buttons: ['OK'],
-          defaultId: 0,
-          noLink: true,
-        })
-        return
-      case 'manual-recovery-required':
-        await dialog.showMessageBox({
-          type: 'warning',
-          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-          message: zh ? '配置文件被外部修改，无法自动恢复。' : 'Profile files were modified externally; automatic recovery is not possible.',
-          detail: zh
-            ? `涉及文件：${outcome.mismatchedFiles.join(', ')}。请手动处理 ${statePath}。`
-            : `Affected files: ${outcome.mismatchedFiles.join(', ')}. Repair ${statePath} manually.`,
-          buttons: ['OK'],
-          defaultId: 0,
-          noLink: true,
-        })
-        return
-      case 'still-active':
-        await dialog.showMessageBox({
-          type: 'info',
-          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-          message: zh ? '该安装事务可能仍在进行。' : 'This install transaction may still be in progress.',
-          detail: zh ? '请稍后再试，或重启 DSH Desktop。' : 'Please try again later, or restart DSH Desktop.',
-          buttons: ['OK'],
-          defaultId: 0,
-          noLink: true,
-        })
-        return
-      case 'failed':
-        await dialog.showMessageBox({
-          type: 'error',
-          title: zh ? '修复插件安装事务' : 'Resolve Plugin Install Transaction',
-          message: zh ? '无法修复安装事务。' : 'Could not resolve the install transaction.',
-          detail: outcome.message,
-          buttons: ['OK'],
-          defaultId: 0,
-          noLink: true,
-        })
-        return
-    }
-  }
-
-  /** Keep one-click install-recovery failures visible in a packaged GUI process. */
-  private reportInstallRecoveryError(cause: unknown): void {
-    const error = cause instanceof Error ? cause : new Error(String(cause))
-    this.logError(`dsh-plugin-desktop: failed to resolve plugin install recovery: ${error.message}`)
-    try {
-      dialog.showErrorBox('Unable to Resolve Plugin Install', error.message)
-    } catch (dialogCause) {
-      this.logError(`dsh-plugin-desktop: failed to show install recovery error: ${dialogCause instanceof Error ? dialogCause.message : String(dialogCause)}`)
-    }
-  }
-
   private async performDiagnosticExport(): Promise<void> {
     const copy = desktopDiagnosticsPrivacyCopy(this.locale)
     try {
-      const confirmation = await dialog.showMessageBox({
+      const confirmation = await this.showDesktopMessageBox({
         type: 'warning',
         title: copy.title,
         message: copy.message,
@@ -577,11 +439,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (locale === this.currentLocale) return
     this.currentLocale = locale
     this.rebuildTrayMenu()
+    this.rebuildApplicationMenu()
   }
 
   /** @inheritdoc */
   setThemeSource(source: DesktopThemeSource): void {
-    if (this.scheduled?.mode === 'advanced' && this.generation !== undefined) {
+    if (this.platform !== 'linux' && this.generation !== undefined) {
       nativeTheme.themeSource = source
       // Windows can retain the preceding DWM Mica palette until the window is
       // recomposed (for example after minimize/restore). Reapplying the active
@@ -592,7 +455,40 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** @inheritdoc */
   async requestRestart(): Promise<void> {
-    await this.restart()
+    if (this.quitting) return
+    if (this.restartRequest !== undefined) return await this.restartRequest
+    const request = this.confirmAndRestart('normal').finally(() => {
+      if (this.restartRequest === request) this.restartRequest = undefined
+    })
+    this.restartRequest = request
+    await request
+  }
+
+  /** @inheritdoc */
+  async requestRecoveryRestart(): Promise<void> {
+    if (this.quitting) return
+    if (this.restartRequest !== undefined) return await this.restartRequest
+    const request = this.confirmAndRestart('recovery').finally(() => {
+      if (this.restartRequest === request) this.restartRequest = undefined
+    })
+    this.restartRequest = request
+    await request
+  }
+
+  private async confirmAndRestart(target: 'normal' | 'recovery'): Promise<void> {
+    const copy = desktopRestartConfirmationCopy(this.currentLocale, target)
+    const options: Electron.MessageBoxOptions = {
+      type: 'question',
+      title: copy.title,
+      message: copy.message,
+      detail: copy.detail,
+      buttons: [copy.confirm, copy.cancel],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    }
+    const result = await this.showDesktopMessageBox(options)
+    if (result.response === 0) await this.restart(target === 'recovery' ? 'recovery' : undefined)
   }
 
   /** @inheritdoc */
@@ -606,16 +502,17 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   }
 
   private async showRendererBootRecovery(report: Extract<RendererBootReport, { status: 'failed' }>): Promise<void> {
+    const copy = desktopNativeCopy(this.currentLocale)
     const plugins = report.plugins.length === 0
-      ? 'Unknown client plugin'
+      ? copy.unknownPlugin
       : report.plugins.map(plugin => `- ${plugin}`).join('\n')
-    const error = report.error === undefined ? 'The client Loader did not provide an error message.' : report.error
-    const result = await dialog.showMessageBox({
+    const error = report.error === undefined ? copy.missingPluginError : report.error
+    const result = await this.showDesktopMessageBox({
       type: 'error',
-      title: 'Plugin Recovery',
-      message: 'DSH Desktop could not load all plugins.',
-      detail: `Failed plugins:\n${plugins}\n\n${error}\n\nOpen DSH Terminal to update or remove the failing third-party plugin, then restart DSH Desktop.`,
-      buttons: ['Open DSH Terminal', 'Restart DSH Desktop', 'Dismiss'],
+      title: copy.pluginRecoveryTitle,
+      message: copy.pluginRecoveryMessage,
+      detail: `${copy.failedPlugins}\n${plugins}\n\n${error}\n\n${copy.pluginRecoveryInstructions}`,
+      buttons: [copy.openTerminal, copy.restart, copy.dismiss],
       defaultId: 0,
       cancelId: 2,
       noLink: true,
@@ -667,17 +564,35 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       title: notification.title,
       body: notification.body,
     })
+    nativeNotification.once('click', () => { this.show() })
     nativeNotification.show()
+  }
+
+  private async showUpdateMessageBox(options: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> {
+    return await this.showDesktopMessageBox(options)
+  }
+
+  private async showDesktopMessageBox(options: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> {
+    return this.generation === undefined
+      ? await showDesktopMessageBox(options)
+      : await this.generation.showMessageBox(options)
+  }
+
+  private async showUpdateSaveDialog(options: Electron.SaveDialogOptions): Promise<Electron.SaveDialogReturnValue> {
+    return this.generation === undefined
+      ? await dialog.showSaveDialog(options)
+      : await this.generation.showSaveDialog(options)
   }
 
   /** Ask before making the fixed download endpoint's counted request. */
   private async confirmUpdateDownload(version: string): Promise<boolean> {
-    const result = await dialog.showMessageBox({
+    const copy = desktopNativeCopy(this.currentLocale)
+    const result = await this.showUpdateMessageBox({
       type: 'info',
-      title: 'DSH Desktop Update Available',
-      message: `DSH Desktop ${version} is available.`,
-      detail: 'Download this update now?',
-      buttons: ['Download', 'Later'],
+      title: copy.updateAvailableTitle,
+      message: copy.updateAvailableMessage(version),
+      detail: copy.downloadUpdate,
+      buttons: [copy.download, copy.later],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
@@ -687,13 +602,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** Report one user-triggered check without exposing network or response details. */
   private async showManualUpdateCheckResult(result: UpdateCheckResult | null): Promise<void> {
+    const copy = desktopNativeCopy(this.currentLocale)
     if (result === null) {
-      await dialog.showMessageBox({
+      await this.showUpdateMessageBox({
         type: 'warning',
-        title: 'Unable to Check for Updates',
-        message: 'DSH Desktop could not check for updates.',
-        detail: 'Please try again later.',
-        buttons: ['OK'],
+        title: copy.updateCheckFailedTitle,
+        message: copy.updateCheckFailedMessage,
+        detail: copy.tryAgainLater,
+        buttons: [copy.ok],
         defaultId: 0,
         noLink: true,
       })
@@ -701,24 +617,24 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     }
 
     if (result.status === 'up-to-date') {
-      await dialog.showMessageBox({
+      await this.showUpdateMessageBox({
         type: 'info',
-        title: 'DSH Desktop Is Up to Date',
-        message: 'No newer version of DSH Desktop is available.',
-        detail: `Installed version: ${result.currentVersion}`,
-        buttons: ['OK'],
+        title: copy.upToDateTitle,
+        message: copy.upToDateMessage,
+        detail: copy.installedVersion(result.currentVersion),
+        buttons: [copy.ok],
         defaultId: 0,
         noLink: true,
       })
       return
     }
 
-    await dialog.showMessageBox({
+    await this.showUpdateMessageBox({
       type: 'info',
-      title: 'DSH Desktop Update Available',
-      message: `DSH Desktop ${result.latestVersion} is available.`,
-      detail: 'Installer downloads are unavailable in this build.',
-      buttons: ['OK'],
+      title: copy.updateAvailableTitle,
+      message: copy.updateAvailableMessage(result.latestVersion),
+      detail: copy.installerUnavailable,
+      buttons: [copy.ok],
       defaultId: 0,
       noLink: true,
     })
@@ -726,6 +642,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** Download a confirmed installer and hand it to the native installation flow. */
   private async downloadAndOpenUpdate(version: string, signal: AbortSignal): Promise<void> {
+    const copy = desktopNativeCopy(this.currentLocale)
     const platform = this.platformStrategy.updateDownloadPlatform
     if (platform === undefined) {
       throw new Error(`dsh-plugin-desktop: updates are unavailable on ${this.platform}`)
@@ -752,24 +669,24 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       const openError = await shell.openPath(artifactPath)
       if (openError !== '') throw new Error(`dsh-plugin-desktop: failed to open update disk image: ${openError}`)
       signal.throwIfAborted()
-      await dialog.showMessageBox({
+      await this.showUpdateMessageBox({
         type: 'info',
-        title: 'DSH Desktop Update Downloaded',
-        message: `DSH Desktop ${version} is ready to install.`,
-        detail: 'The disk image has opened. Replace DSH Desktop in Applications, then reopen it.',
-        buttons: ['OK'],
+        title: copy.updateDownloadedTitle,
+        message: copy.updateReady(version),
+        detail: copy.macInstallInstructions,
+        buttons: [copy.ok],
         defaultId: 0,
         noLink: true,
       })
       return
     }
 
-    const result = await dialog.showMessageBox({
+    const result = await this.showUpdateMessageBox({
       type: 'info',
-      title: 'DSH Desktop Update Downloaded',
-      message: `DSH Desktop ${version} is ready to install.`,
-      detail: 'Restart DSH Desktop and run the installer now?',
-      buttons: ['Restart and Install', 'Later'],
+      title: copy.updateDownloadedTitle,
+      message: copy.updateReady(version),
+      detail: copy.windowsInstallQuestion,
+      buttons: [copy.restartAndInstall, copy.later],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
@@ -786,17 +703,17 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   private async chooseUpdateDestination(version: string): Promise<string | undefined> {
     if (this.platform !== 'darwin' && this.platform !== 'win32') return undefined
-    const zh = this.currentLocale === 'zh'
+    const copy = desktopNativeCopy(this.currentLocale)
     const filename = desktopUpdateFilename(this.platform, version)
     const extension = this.platform === 'darwin' ? 'dmg' : 'exe'
-    const result = await dialog.showSaveDialog({
-      title: zh ? '保存更新安装包' : 'Save Update Installer',
+    const result = await this.showUpdateSaveDialog({
+      title: copy.saveInstallerTitle,
       defaultPath: join(app.getPath('downloads'), filename),
-      buttonLabel: zh ? '保存并下载' : 'Save and Download',
+      buttonLabel: copy.saveAndDownload,
       filters: [{
         name: this.platform === 'darwin'
-          ? zh ? '磁盘映像' : 'Disk Image'
-          : zh ? 'Windows 安装程序' : 'Windows Installer',
+          ? copy.diskImage
+          : copy.windowsInstaller,
         extensions: [extension],
       }],
       properties: ['createDirectory', 'showOverwriteConfirmation', 'dontAddToRecent'],
@@ -818,17 +735,13 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const userDataPath = app.getPath('userData')
     const artifact = await pendingDesktopUpdateArtifact(userDataPath, PRODUCT_VERSION, this.platform)
     if (artifact === undefined) return
-    const zh = this.currentLocale === 'zh'
-    const result = await dialog.showMessageBox({
+    const copy = desktopNativeCopy(this.currentLocale)
+    const result = await this.showUpdateMessageBox({
       type: 'question',
-      title: zh ? '删除更新安装包' : 'Remove Update Installer',
-      message: zh
-        ? `DSH Desktop ${artifact.version} 已安装。`
-        : `DSH Desktop ${artifact.version} has been installed.`,
-      detail: zh
-        ? `是否删除下载的安装包以释放磁盘空间？\n\n${artifact.path}`
-        : `Delete the downloaded installer to free disk space?\n\n${artifact.path}`,
-      buttons: zh ? ['删除安装包', '保留安装包'] : ['Delete Installer', 'Keep Installer'],
+      title: copy.removeInstallerTitle,
+      message: copy.updateInstalled(artifact.version),
+      detail: copy.removeInstallerQuestion(artifact.path),
+      buttons: [copy.deleteInstaller, copy.keepInstaller],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
@@ -845,7 +758,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
           detached: true,
           stdio: 'ignore',
           shell: false,
-          windowsHide: false,
+          windowsHide: true,
         })
       } catch (cause) {
         reject(cause)
@@ -867,23 +780,37 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   /** Keep native-terminal launch failures visible in a packaged GUI process. */
   private reportTerminalLaunchError(cause: unknown): void {
     const error = cause instanceof Error ? cause : new Error(String(cause))
+    const copy = desktopNativeCopy(this.currentLocale)
     this.logError(`dsh-plugin-desktop: failed to open terminal: ${error.message}`)
-    try {
-      dialog.showErrorBox('Unable to Open DSH Terminal', error.message)
-    } catch (dialogCause) {
+    void this.showDesktopMessageBox({
+      type: 'error',
+      title: copy.terminalErrorTitle,
+      message: copy.terminalErrorMessage,
+      detail: error.message,
+      buttons: [copy.ok],
+      defaultId: 0,
+      cancelId: 0,
+    }).catch((dialogCause: unknown) => {
       this.logError(`dsh-plugin-desktop: failed to show terminal error: ${dialogCause instanceof Error ? dialogCause.message : String(dialogCause)}`)
-    }
+    })
   }
 
   /** Keep diagnostic export failures visible in a packaged GUI process. */
   private reportDiagnosticExportError(cause: unknown): void {
     const error = cause instanceof Error ? cause : new Error(String(cause))
+    const copy = desktopNativeCopy(this.currentLocale)
     this.logError(`dsh-plugin-desktop: failed to export diagnostics: ${error.message}`)
-    try {
-      dialog.showErrorBox('Unable to Export Diagnostics', error.message)
-    } catch (dialogCause) {
+    void this.showDesktopMessageBox({
+      type: 'error',
+      title: copy.diagnosticsErrorTitle,
+      message: copy.diagnosticsErrorMessage,
+      detail: error.message,
+      buttons: [copy.ok],
+      defaultId: 0,
+      cancelId: 0,
+    }).catch((dialogCause: unknown) => {
       this.logError(`dsh-plugin-desktop: failed to show diagnostics error: ${dialogCause instanceof Error ? dialogCause.message : String(dialogCause)}`)
-    }
+    })
   }
 
   private buildTrayTemplate(spec: DesktopShellSpec): Electron.MenuItemConstructorOptions[] {
@@ -918,5 +845,21 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const spec = this.scheduled
     if (spec === undefined) return
     this.generation?.refreshTrayMenu()
+  }
+
+  /** Rebuild the macOS application menu from the same native, Host-owned commands as the tray. */
+  private rebuildApplicationMenu(): void {
+    this.platformStrategy.refreshApplicationMenu(this.buildApplicationMenuItems())
+  }
+
+  /** Keep the app menu renderer-free by reusing trusted native tray contributions. */
+  private buildApplicationMenuItems(): Electron.MenuItemConstructorOptions[] {
+    const tools = this.contributedTrayItems('tools')
+    const profiles = this.contributedTrayItems('profiles')
+    const items: Electron.MenuItemConstructorOptions[] = []
+    if (tools.length > 0) items.push(...tools)
+    if (tools.length > 0 && profiles.length > 0) items.push({ type: 'separator' })
+    if (profiles.length > 0) items.push(...profiles)
+    return items
   }
 }

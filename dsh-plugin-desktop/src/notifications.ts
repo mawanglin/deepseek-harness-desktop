@@ -13,6 +13,7 @@ export const inject = ['desktopRuntime']
 export const DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE = settingsNamespace('dsh-desktop-notifications')
 
 export interface DesktopNotificationSettings {
+  enabled: boolean
   notifyOnTurnCompletion: boolean
   notifyOnTurnFailure: boolean
   notifyOnJobCompletion: boolean
@@ -20,6 +21,7 @@ export interface DesktopNotificationSettings {
 }
 
 export const DesktopNotificationSettingsSchema: z<DesktopNotificationSettings> = z.object({
+  enabled: z.boolean().default(true),
   notifyOnTurnCompletion: z.boolean().default(true),
   notifyOnTurnFailure: z.boolean().default(true),
   notifyOnJobCompletion: z.boolean().default(true),
@@ -32,16 +34,16 @@ type NotificationOutcome = 'turn-completed' | 'turn-failed' | 'job-completed' | 
 
 const NOTIFICATION_COPY: Record<DesktopLocale, Record<NotificationOutcome, DesktopNotification>> = {
   en: {
-    'turn-completed': { title: 'Turn Completed', body: 'A direct user turn has finished.' },
-    'turn-failed': { title: 'User Turn Failed', body: 'A direct user turn needs attention.' },
+    'turn-completed': { title: 'User Turn Completed', body: 'A user-initiated turn has finished.' },
+    'turn-failed': { title: 'User Turn Failed', body: 'A user-initiated turn could not finish. Open DSH Desktop for details.' },
     'job-completed': { title: 'Background Job Completed', body: 'A background job has finished.' },
-    'job-failed': { title: 'Background Job Failed', body: 'A background job needs attention.' },
+    'job-failed': { title: 'Background Job Failed', body: 'A background job could not finish. Open DSH Desktop for details.' },
   },
   zh: {
-    'turn-completed': { title: '用户回合已完成', body: '有一个用户回合已结束。' },
-    'turn-failed': { title: '用户回合失败', body: '有一个用户回合需要处理。' },
+    'turn-completed': { title: '用户回合已完成', body: '一个由你发起的回合已完成。' },
+    'turn-failed': { title: '用户回合失败', body: '一个由你发起的回合未能完成，请打开 DSH Desktop 查看详情。' },
     'job-completed': { title: '后台任务已完成', body: '有一个后台任务已结束。' },
-    'job-failed': { title: '后台任务失败', body: '有一个后台任务需要处理。' },
+    'job-failed': { title: '后台任务失败', body: '一个后台任务未能完成，请打开 DSH Desktop 查看详情。' },
   },
 }
 
@@ -55,6 +57,7 @@ function notifyJob(
   settings: DesktopNotificationSettings,
   snapshot: JobSnapshot,
 ): void {
+  if (!settings.enabled) return
   if (snapshot.status === 'completed' && settings.notifyOnJobCompletion) {
     runtime.notifyAttention(NOTIFICATION_COPY[runtime.locale]['job-completed'])
   } else if (snapshot.status === 'failed' && settings.notifyOnJobFailure) {
@@ -69,6 +72,7 @@ function trackTurn(
   session: Session,
   event: SessionEvent,
 ): void {
+  if (!settings.enabled) return
   if (session.header.origin === 'subagent') return
   const sessionId = String(session.header.id)
 
