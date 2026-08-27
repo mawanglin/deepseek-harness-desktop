@@ -46,7 +46,7 @@ function fixture(options: Partial<ProfileCheckpointOptions> = {}): {
     profileIdentity: 'profile-identity',
     profileName: 'work',
     provider: 'dsh-market',
-    appVersion: '2.0.3',
+    appVersion: '2.0.3-1',
     ...options,
   })
   return { root, home, profile, userData, checkpoint }
@@ -72,7 +72,7 @@ describe('Desktop profile health checkpoints', () => {
         capturedAt: '2026-08-25T01:02:03.000Z',
         profileName: 'work',
         provider: 'dsh-market',
-        appVersion: '2.0.3',
+        appVersion: '2.0.3-1',
         reason: 'healthy-startup',
       },
     })
@@ -245,7 +245,7 @@ describe('Desktop profile health checkpoints', () => {
       profileIdentity: 'profile-identity',
       profileName: 'work',
       provider: 'other-market',
-      appVersion: '2.0.3',
+      appVersion: '2.0.3-1',
     })
     expect(reopened.listSlots()[0]).toMatchObject({
       snapshotExists: true,

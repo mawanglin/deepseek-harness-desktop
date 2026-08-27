@@ -45,7 +45,7 @@ function slots(root: string): readonly ProfileCheckpointSlot[] {
           provider: 'desktop-profile',
           slotId: `slot-${index}` as 'slot-1' | 'slot-2',
           reason: 'healthy-startup',
-          appVersion: '2.0.3',
+          appVersion: '2.0.3-1',
           files: [{ name: 'package.json', present: true, sha256: 'a'.repeat(64), size: 20, mode: 0o600 }],
         },
         pluginCount: index + 2,
@@ -116,8 +116,8 @@ describe('pre-Host Desktop startup recovery controller', () => {
     expect(snapshot.bundles.find(item => item.packageName === 'detached-bundle')).toMatchObject({ owner: 'external', action: null })
     expect(snapshot.bundles.find(item => item.packageName === 'dsh-plugin-desktop')).toMatchObject({ owner: 'core', action: null })
     expect(snapshot.checkpoints).toEqual([
-      { slotId: 'slot-1', status: 'available', capturedAt: '2026-08-21T00:00:00.000Z', appVersion: '2.0.3', provider: 'desktop-profile', fileCount: 1, pluginCount: 3, totalBytes: 20 },
-      { slotId: 'slot-2', status: 'available', capturedAt: '2026-08-22T00:00:00.000Z', appVersion: '2.0.3', provider: 'desktop-profile', fileCount: 1, pluginCount: 4, totalBytes: 20 },
+      { slotId: 'slot-1', status: 'available', capturedAt: '2026-08-21T00:00:00.000Z', appVersion: '2.0.3-1', provider: 'desktop-profile', fileCount: 1, pluginCount: 3, totalBytes: 20 },
+      { slotId: 'slot-2', status: 'available', capturedAt: '2026-08-22T00:00:00.000Z', appVersion: '2.0.3-1', provider: 'desktop-profile', fileCount: 1, pluginCount: 4, totalBytes: 20 },
       { slotId: 'slot-3', status: 'empty' },
     ])
     const exported = JSON.stringify(snapshot)

@@ -295,13 +295,13 @@ describe('Desktop native action presentation', () => {
 
   it('renders the Host-supplied version through the shadcn hover-card trigger', () => {
     const markup = renderToStaticMarkup(createElement(DesktopVersionControl, {
-      version: '2.0.3',
+      version: '2.0.3-1',
       checkForUpdates: api.checkForUpdates,
       t,
     }))
 
-    expect(markup).toContain('v2.0.3')
-    expect(markup).toContain('aria-label="Current version v2.0.3"')
+    expect(markup).toContain('v2.0.3-1')
+    expect(markup).toContain('aria-label="Current version v2.0.3-1"')
     expect(markup).toContain('data-slot="hover-card-trigger"')
   })
 
@@ -425,7 +425,7 @@ describe('Desktop settings Slot registration', () => {
     } as unknown as ClientContext
 
     const control = applyDesktopSettings(ctx, {
-      version: '2.0.3',
+      version: '2.0.3-1',
       mode: 'compatibility',
       platform: 'darwin',
       material: 'off',
