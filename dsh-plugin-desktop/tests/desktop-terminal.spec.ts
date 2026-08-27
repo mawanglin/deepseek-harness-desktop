@@ -615,9 +615,10 @@ describe('desktop terminal environment', () => {
     }
 
     expect(() => openDesktopTerminal(options)).toThrow(/terminal requires/u)
-    const shimDir = join(stateDir, 'bin')
-    const expected: string[] = []
-    for (const command of [
+    // 每个候选命令按 PATH 顺序探测四次:私有 shim 目录(Windows 上其
+    // 盘符会被冒号分隔符切掉,所以不比较盘符),然后是 /usr/local/bin、
+    // /usr/bin、/bin(Windows 上以反斜杠呈现)。
+    const commands = [
       'gnome-terminal',
       'konsole',
       'xfce4-terminal',
@@ -626,15 +627,16 @@ describe('desktop terminal environment', () => {
       'xterm',
       'x-terminal-emulator',
       'xdg-terminal-exec',
-    ]) {
-      expected.push(
-        join(shimDir, command),
-        join('/usr/local/bin', command),
-        join('/usr/bin', command),
-        join('/bin', command),
-      )
-    }
-    expect(probes).toEqual(expected)
+    ]
+    expect(probes).toHaveLength(commands.length * 4)
+    commands.forEach((command, index) => {
+      const group = probes.slice(index * 4, index * 4 + 4)
+      expect(group).toHaveLength(4)
+      expect(group[0]).toMatch(new RegExp(`[/\\\\]bin[/\\\\]${command}$`))
+      expect(group[1]).toMatch(new RegExp(`[/\\\\]usr[/\\\\]local[/\\\\]bin[/\\\\]${command}$`))
+      expect(group[2]).toMatch(new RegExp(`[/\\\\]usr[/\\\\]bin[/\\\\]${command}$`))
+      expect(group[3]).toMatch(new RegExp(`[/\\\\]bin[/\\\\]${command}$`))
+    })
     expect(harness.calls).toHaveLength(0)
   })
 
