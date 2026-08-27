@@ -10,8 +10,6 @@
       disabled: !!js process.platform === 'linux'
     - id: desktop-diagnostics
       name: dsh-plugin-desktop/diagnostics
-    - id: desktop-install-recovery
-      name: dsh-plugin-desktop/install-recovery-tray
     - id: desktop-notifications
       name: dsh-plugin-desktop/notifications
     - id: desktop-pnpm
