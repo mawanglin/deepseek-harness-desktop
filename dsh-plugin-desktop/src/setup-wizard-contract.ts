@@ -3,7 +3,7 @@
 export type DesktopSetupWizardPlatform = 'darwin' | 'win32' | 'linux'
 export type DesktopSetupWizardMode = 'compatibility' | 'extended' | 'advanced'
 export type DesktopSetupWizardMacosMaterial = 'off' | 'transparent'
-export type DesktopSetupWizardWindowsMaterial = 'off' | 'acrylic' | 'mica'
+export type DesktopSetupWizardWindowsMaterial = 'off' | 'mica'
 export type DesktopSetupWizardNetworkExposure = 'loopback' | 'lan'
 export type DesktopSetupWizardMarket = 'disabled' | 'community-market' | 'dsh-market'
 
@@ -22,6 +22,7 @@ export interface DesktopSetupWizardSelection {
   readonly windowsMaterial: DesktopSetupWizardWindowsMaterial
   readonly openBrowser: boolean
   readonly networkExposure: DesktopSetupWizardNetworkExposure
+  readonly aaEnabled?: boolean
   readonly market: DesktopSetupWizardMarket
   readonly notifications: DesktopSetupWizardNotifications
 }
@@ -44,6 +45,7 @@ const SELECTION_KEYS = Object.freeze([
   'windowsMaterial',
   'openBrowser',
   'networkExposure',
+  'aaEnabled',
   'market',
   'notifications',
 ] as const)
@@ -61,7 +63,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value)
+  const actual = Object.keys(expected.includes('aaEnabled') ? { aaEnabled: false, ...value } : value)
   return actual.length === expected.length && actual.every(key => expected.includes(key))
 }
 
@@ -74,7 +76,7 @@ function isMacosMaterial(value: unknown): value is DesktopSetupWizardMacosMateri
 }
 
 function isWindowsMaterial(value: unknown): value is DesktopSetupWizardWindowsMaterial {
-  return value === 'off' || value === 'acrylic' || value === 'mica'
+  return value === 'off' || value === 'mica'
 }
 
 function isNetworkExposure(value: unknown): value is DesktopSetupWizardNetworkExposure {
@@ -98,7 +100,8 @@ export function isDesktopSetupWizardNotifications(
 }
 
 function hasSelectionValues(value: Record<string, unknown>): boolean {
-  return isMode(value.mode)
+  return (value.aaEnabled === undefined || typeof value.aaEnabled === 'boolean')
+    && isMode(value.mode)
     && isMacosMaterial(value.macosMaterial)
     && isWindowsMaterial(value.windowsMaterial)
     && typeof value.openBrowser === 'boolean'

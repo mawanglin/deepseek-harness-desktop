@@ -53,17 +53,19 @@ export function apply(ctx: Context, config: Config): void {
     const unregister = ctx.webServer.register({
       kind: 'exact',
       path: DESKTOP_UPDATE_CHECK_PATH,
-      handler: (req, res) => handleDesktopUpdateCheckRequest(
-        req,
-        res,
-        rendererOrigin,
-        () => lifecycle.checkNow(),
-        (operation, cause) => {
-          ctx.logger.error(
-            `dsh-plugin-desktop: failed to ${operation}: ${cause instanceof Error ? cause.message : String(cause)}`,
-          )
-        },
-      ),
+      handler: (req, res) => {
+        return handleDesktopUpdateCheckRequest(
+          req,
+          res,
+          rendererOrigin,
+          () => lifecycle.checkNow(),
+          (operation, cause) => {
+            ctx.logger.error(
+              `dsh-plugin-desktop: failed to ${operation}: ${cause instanceof Error ? cause.message : String(cause)}`,
+            )
+          },
+        )
+      },
     })
     return async () => {
       unregister()

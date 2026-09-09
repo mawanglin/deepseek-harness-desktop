@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs'
+import { createElement, type ReactNode } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { apply } from '../src/client/index.ts'
-import { AdvancedFrame } from '../src/client/AdvancedFrame.tsx'
+import { AdvancedFrame, type AdvancedFrameProps } from '../src/client/AdvancedFrame.tsx'
 import { applyAdvancedShell } from '../src/client/advanced-shell.ts'
-import { provideDesktopLayout } from '../src/client/layout-service.ts'
+import { installDesktopLayout } from '../src/client/layout-service.ts'
 import { parseDesktopClientEnvironment } from '../src/client/environment.ts'
 import { ExtendedFrame } from '../src/client/ExtendedFrame.tsx'
 import { applyExtendedShell, applyFramedShell } from '../src/client/extended-shell.ts'
@@ -40,12 +42,14 @@ describe('desktop client environment', () => {
   })
 
   it('accepts the Electron-owned kebab query markers', () => {
-    expect(parseDesktopClientEnvironment('?dsh-desktop-mode=advanced&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.3-2&dsh-desktop-material=transparent'))
-      .toEqual({ version: '2.0.3-2', mode: 'advanced', platform: 'darwin', material: 'transparent', micaSupported: false })
-    expect(parseDesktopClientEnvironment('?dsh-desktop-platform=win32&dsh-desktop-mode=compatibility&dsh-desktop-version=2.0.3-2&dsh-desktop-material=off&dsh-desktop-mica=0'))
-      .toEqual({ version: '2.0.3-2', mode: 'compatibility', platform: 'win32', material: 'off', micaSupported: false })
-    expect(parseDesktopClientEnvironment('?dsh-desktop-mode=extended&dsh-desktop-platform=win32&dsh-desktop-version=2.0.3-2&dsh-desktop-material=mica&dsh-desktop-mica=1'))
-      .toEqual({ version: '2.0.3-2', mode: 'extended', platform: 'win32', material: 'mica', micaSupported: true })
+expect(parseDesktopClientEnvironment('?dsh-desktop-mode=advanced&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.6&dsh-desktop-material=transparent'))
+      .toEqual({ version: '2.0.6', mode: 'advanced', platform: 'darwin', material: 'transparent', micaSupported: false })
+    expect(parseDesktopClientEnvironment('?dsh-desktop-platform=win32&dsh-desktop-mode=compatibility&dsh-desktop-version=2.0.6&dsh-desktop-material=off&dsh-desktop-mica=0'))
+      .toEqual({ version: '2.0.6', mode: 'compatibility', platform: 'win32', material: 'off', micaSupported: false })
+    expect(parseDesktopClientEnvironment('?dsh-desktop-mode=extended&dsh-desktop-platform=win32&dsh-desktop-version=2.0.6&dsh-desktop-material=mica&dsh-desktop-mica=1'))
+      .toEqual({ version: '2.0.6', mode: 'extended', platform: 'win32', material: 'mica', micaSupported: true })
+    expect(parseDesktopClientEnvironment('?dsh-desktop-mode=extended&dsh-desktop-platform=win32&dsh-desktop-version=2.0.6&dsh-desktop-material=acrylic&dsh-desktop-mica=0'))
+      .toEqual({ version: '2.0.6', mode: 'extended', platform: 'win32', material: 'off', micaSupported: false })
   })
 
   it.each([
@@ -62,6 +66,29 @@ describe('desktop client environment', () => {
 })
 
 describe('advanced desktop layout', () => {
+  it.each([
+    ['advanced', AdvancedFrame],
+    ['extended', ExtendedFrame],
+  ] as const)('binds the strict details slot through SessionProvider in %s mode', (_mode, Frame) => {
+    vi.stubGlobal('window', { innerWidth: 1440 })
+    const props = {
+      layout: new DesktopLayoutState(),
+      platform: 'darwin',
+      useSessions: (select: (state: { current?: string; byId: Record<string, { blank: boolean }> }) => unknown) =>
+        select({ byId: {} }),
+      SessionProvider: ({ children }: { children?: ReactNode }) =>
+        createElement('section', { 'data-session-provider': '' }, children),
+      renderSlot: (name: string) => createElement('span', { 'data-slot': name }),
+    } as unknown as AdvancedFrameProps
+
+    try {
+      const markup = renderToStaticMarkup(createElement(Frame, props))
+      expect(markup).toContain('<section data-session-provider=""><span data-slot="details"></span></section>')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('orders the Windows drag region after scrollable content and before overlays', () => {
     const frame = readFileSync(new URL('../src/client/AdvancedFrame.tsx', import.meta.url), 'utf8')
     const conversation = frame.indexOf('className="dshDesktopConversationSurface"')
@@ -144,19 +171,25 @@ describe('advanced desktop layout', () => {
 
   it('releases the Cordis layout service with its owning effect', () => {
     let disposed = false
+    let uninstall: unknown
     const ctx = {
       reflect: {
+        get: () => undefined,
         provide: (name: string, value: unknown) => {
           expect(name).toBe('layout')
           expect(value).toBeInstanceOf(DesktopLayoutState)
           return () => { disposed = true }
         },
       },
+      // Cordis runs the factory eagerly and registers its result as the
+      // fiber-owned uninstaller; capture that result the same way.
+      effect: (factory: () => unknown) => { uninstall = factory() },
     } as unknown as ClientContext
 
-    const dispose = provideDesktopLayout(ctx, new DesktopLayoutState())
+    installDesktopLayout(ctx, new DesktopLayoutState())
     expect(disposed).toBe(false)
-    dispose()
+    expect(typeof uninstall).toBe('function')
+    ;(uninstall as () => void)()
     expect(disposed).toBe(true)
   })
 
@@ -190,7 +223,7 @@ describe('advanced desktop layout', () => {
         const dispose = mount()
         if (typeof dispose === 'function') disposers.push(dispose)
       }),
-      reflect: { provide: vi.fn(() => () => {}) },
+      reflect: { get: vi.fn(), provide: vi.fn(() => () => {}) },
       theme: {
         getTheme: vi.fn(() => ({ active: { colorScheme: 'dark', tokens: {} } })),
       },
@@ -267,14 +300,14 @@ describe('advanced desktop layout', () => {
     expect(Object.isFrozen(mac.safeAreaInsets)).toBe(true)
     expect(Object.isFrozen(mac.dragRegion)).toBe(true)
     expect(desktopWindowService({
-      version: '2.0.3-2', mode: 'advanced', platform: 'win32', material: 'acrylic', micaSupported: false,
+      version: '2.0.6', mode: 'advanced', platform: 'win32', material: 'off', micaSupported: false,
     })).toEqual({
       version: '2.0.3-2',
       mode: 'advanced',
       platform: 'win32',
-      material: 'acrylic',
+      material: 'off',
       micaSupported: false,
-      availableMaterials: ['off', 'acrylic'],
+      availableMaterials: ['off'],
       safeAreaInsets: { top: ADVANCED_WINDOWS_TITLEBAR_HEIGHT, right: 0, bottom: 0, left: 0 },
       dragRegion: {
         height: ADVANCED_WINDOWS_TITLEBAR_HEIGHT,
@@ -290,7 +323,7 @@ describe('advanced desktop layout', () => {
       platform: 'win32',
       material: 'mica',
       micaSupported: true,
-      availableMaterials: ['off', 'acrylic', 'mica'],
+      availableMaterials: ['off', 'mica'],
       safeAreaInsets: { top: DESKTOP_FRAME_HEIGHT, right: 0, bottom: 0, left: 0 },
       dragRegion: {
         height: DESKTOP_FRAME_HEIGHT,
@@ -437,7 +470,7 @@ describe('independent Desktop frame', () => {
         const dispose = mount()
         if (typeof dispose === 'function') disposers.push(dispose)
       }),
-      reflect: { provide: vi.fn(() => () => {}) },
+      reflect: { get: vi.fn(), provide: vi.fn(() => () => {}) },
       theme: {
         getTheme: vi.fn(() => ({ active: { colorScheme: 'dark', tokens: {} } })),
       },
@@ -457,7 +490,7 @@ describe('independent Desktop frame', () => {
         version: '2.0.3-2',
         mode: 'extended',
         platform: 'win32',
-        material: 'acrylic',
+        material: 'off',
         micaSupported: false,
       })
       expect(registrations[0]).toMatchObject({
@@ -483,7 +516,7 @@ describe('independent Desktop frame', () => {
       expect(registrations[1]).not.toHaveProperty('children')
       expect(registrations[1]?.inject).toBeTypeOf('function')
       expect((registrations[1]?.inject as () => Record<string, unknown>)()).toMatchObject({
-        environment: { mode: 'extended', platform: 'win32', material: 'acrylic' },
+        environment: { mode: 'extended', platform: 'win32', material: 'off' },
         api: expect.any(Object),
         setMode: expect.any(Function),
       })
@@ -491,7 +524,7 @@ describe('independent Desktop frame', () => {
       expect(dataset).toMatchObject({
         dshDesktopMode: 'extended',
         dshDesktopPlatform: 'win32',
-        dshDesktopMaterial: 'acrylic',
+        dshDesktopMaterial: 'off',
       })
       expect(rootDataset).toEqual({ dshDesktopContentViewport: '' })
       disposers.forEach(dispose => { dispose() })

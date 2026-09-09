@@ -1,5 +1,6 @@
 /** DSH Desktop Host plugin: owns the selected native shell generation. */
 
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -9,6 +10,7 @@ import {
   type LocaleSettings,
 } from '@deepseek-ai/dsh-client-locale'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import {
   THEME_SETTINGS_NAMESPACE,
   type ThemeSettings,
@@ -29,9 +31,9 @@ import {
 import {
   DESKTOP_DIAGNOSTICS_EXPORT_PATH,
   DESKTOP_DEVELOPER_TOOLS_TOGGLE_PATH,
+  DESKTOP_AA_SELECT_PATH,
   DESKTOP_MARKET_SELECT_PATH,
   DESKTOP_PROFILE_CREATE_PATH,
-  DESKTOP_PROFILE_CREATE_WINDOW_PATH,
   DESKTOP_PROFILE_DELETE_PATH,
   DESKTOP_PROFILE_SELECT_PATH,
   DESKTOP_RESTART_PATH,
@@ -43,9 +45,9 @@ import {
 import {
   handleDesktopDiagnosticsExportRequest,
   handleDesktopDeveloperToolsToggleRequest,
+  handleDesktopAaSelectRequest,
   handleDesktopMarketSelectRequest,
   handleDesktopProfileCreateRequest,
-  handleDesktopProfileCreateWindowRequest,
   handleDesktopProfileDeleteRequest,
   handleDesktopProfileSelectRequest,
   handleDesktopRestartRequest,
@@ -55,6 +57,7 @@ import {
   handleDesktopTerminalOpenRequest,
 } from './desktop-settings-route.ts'
 import type {} from './desktop-settings-controller.ts'
+import { DESKTOP_LAN_HTTPS_CA_PATH } from './lan-https-runtime.ts'
 import { desktopBootRecoveryInjections } from './desktop-boot-recovery.ts'
 import {
   DESKTOP_TERMINAL_OPEN_PATH as CLI_LAUNCHER_TERMINAL_OPEN_PATH,
@@ -62,7 +65,7 @@ import {
 import {
   handleDesktopTerminalOpenRequest as handleCliLauncherTerminalOpenRequest,
 } from './desktop-cli-launcher-route.ts'
-import type { DesktopShellMode } from './runtime.ts'
+import type { DesktopLocale, DesktopShellMode } from './runtime.ts'
 import type {} from './runtime.ts'
 import { DESKTOP_DEFAULT_WEB_PORT } from './desktop-port.ts'
 import {
@@ -79,7 +82,7 @@ import {
   effectiveDesktopWindowMaterial,
   type DesktopWindowMaterial,
   type MacosWindowMaterial,
-  type WindowsWindowMaterial,
+  type PersistedWindowsWindowMaterial,
   windowsSupportsMica,
 } from './window-material.ts'
 
@@ -88,13 +91,31 @@ export const name = 'desktop-shell'
 
 /** Services required before the shell can register its renderer generation. */
 /** Services required by the desktop shell; `desktopRuntime` is probed, not required. */
-export const inject = ['webServer', 'webRuntime', 'appExit', 'settings']
+export const inject = ['webServer', 'webRuntime', 'appExit', 'settings', 'connection']
 
 /** Standard settings namespace shared by tray and configuration surfaces. */
 export const DESKTOP_SETTINGS_NAMESPACE = settingsNamespace('dsh-desktop')
 
 const UI_THEME_SETTINGS_NAMESPACE = settingsNamespace(THEME_SETTINGS_NAMESPACE)
 const UI_LOCALE_SETTINGS_NAMESPACE = settingsNamespace(LOCALE_SETTINGS_NAMESPACE)
+
+/** Apply the official Connection trust and browser-auth fence before a private Desktop route. */
+function rejectDesktopRequest(
+  ctx: Context,
+  req: IncomingMessage,
+  res: ServerResponse,
+): boolean {
+  const rejection = ctx.connection.requestRejection(req)
+  if (rejection === undefined) return false
+  res.writeHead(rejection)
+  res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+  return true
+}
+
+/** Narrow the upstream locale preference to the translations bundled by Desktop chrome. */
+function desktopLocalePreference(preference: string | undefined): DesktopLocale | undefined {
+  return preference === 'zh' || preference === 'en' ? preference : undefined
+}
 
 /** Desktop settings presented by the standard settings service. */
 export interface DesktopSettings {
@@ -103,7 +124,7 @@ export interface DesktopSettings {
   /** Native translucency preference used on macOS custom-chrome modes. */
   macosMaterial: MacosWindowMaterial
   /** Native backdrop preference used on Windows custom-chrome modes. */
-  windowsMaterial: WindowsWindowMaterial
+  windowsMaterial: PersistedWindowsWindowMaterial
   /** Loopback Web port selected for the next application generation; zero requests a random port. */
   port: number
   /** Whether Desktop advertises its marker-free compatibility client for browser use. */
@@ -132,7 +153,7 @@ export interface Config {
   /** Native translucency preference used on macOS custom-chrome modes. */
   macosMaterial: MacosWindowMaterial
   /** Native backdrop preference used on Windows custom-chrome modes. */
-  windowsMaterial: WindowsWindowMaterial
+  windowsMaterial: PersistedWindowsWindowMaterial
   /** Configured loopback Web port used to detect restart-applied settings changes. */
   port: number
   /** Configured listener exposure used to detect restart-applied settings changes. */
@@ -214,9 +235,14 @@ export function apply(ctx: Context, config: Config): void {
   if (browserAccess === undefined) {
     throw new Error('dsh-plugin-desktop: the launcher did not provide ctx.desktopBrowserAccess')
   }
+  const lanHttps = ctx.get('desktopLanHttps')
+  if (lanHttps === undefined) {
+    throw new Error('dsh-plugin-desktop: the launcher did not provide ctx.desktopLanHttps')
+  }
   if (ctx.webServer.host !== desktopWebServerHost(config.networkExposure)) {
     throw new Error('dsh-plugin-desktop: desktop shell WebServer host does not match networkExposure')
   }
+  lanHttps.attach(ctx.webServer.port)
   const iconFilename = runtime.platform === 'darwin'
     ? 'app-icon-mac.png'
     : 'app-icon.png'
@@ -231,9 +257,8 @@ export function apply(ctx: Context, config: Config): void {
     {
       applies: 'restart',
       validate: (value) => {
-        if (!desktopBrowserAccessAvailable(value.mode)
-          && (value.openBrowser || value.networkExposure === 'lan')) {
-          throw new Error('dsh-plugin-desktop: browser and LAN access require compatibility mode')
+        if (!desktopBrowserAccessAvailable(value.mode) && value.openBrowser) {
+          throw new Error('dsh-plugin-desktop: browser access requires compatibility mode')
         }
         if (value.mode !== 'compatibility' && runtime.platform === 'linux') {
           throw new Error('dsh-plugin-desktop: custom desktop shell modes are supported on macOS and Windows')
@@ -242,6 +267,36 @@ export function apply(ctx: Context, config: Config): void {
     },
   )
   const rendererOrigin = `http://127.0.0.1:${String(ctx.webServer.port)}`
+  ctx.effect(
+    () => ctx.webServer.register({
+      kind: 'exact',
+      path: DESKTOP_LAN_HTTPS_CA_PATH,
+      handler: (req, res) => {
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          res.statusCode = 405
+          res.setHeader('allow', 'GET, HEAD')
+          res.setHeader('cache-control', 'no-store')
+          res.end('method not allowed')
+          return
+        }
+        const caCertificate = lanHttps.caCertificate
+        if (caCertificate === null) {
+          res.statusCode = 503
+          res.setHeader('cache-control', 'no-store')
+          res.end(req.method === 'HEAD' ? undefined : 'LAN HTTPS certificate unavailable')
+          return
+        }
+        res.statusCode = 200
+        res.setHeader('cache-control', 'no-store')
+        res.setHeader('content-type', 'application/x-x509-ca-cert')
+        res.setHeader('content-disposition', 'attachment; filename="dsh-desktop-local-ca.crt"')
+        res.setHeader('content-length', String(Buffer.byteLength(caCertificate)))
+        res.setHeader('x-content-type-options', 'nosniff')
+        res.end(req.method === 'HEAD' ? undefined : caCertificate)
+      },
+    }),
+    'dsh-plugin-desktop: public LAN HTTPS CA route',
+  )
   ctx.on('webserver/index-inject', table => {
     table.push(...desktopBootRecoveryInjections())
   })
@@ -255,9 +310,9 @@ export function apply(ctx: Context, config: Config): void {
     const settingsRoutes = [
       [DESKTOP_SETTINGS_PATH, handleDesktopSettingsRequest],
       [DESKTOP_PROFILE_CREATE_PATH, handleDesktopProfileCreateRequest],
-      [DESKTOP_PROFILE_CREATE_WINDOW_PATH, handleDesktopProfileCreateWindowRequest],
       [DESKTOP_PROFILE_DELETE_PATH, handleDesktopProfileDeleteRequest],
       [DESKTOP_PROFILE_SELECT_PATH, handleDesktopProfileSelectRequest],
+      [DESKTOP_AA_SELECT_PATH, handleDesktopAaSelectRequest],
       [DESKTOP_MARKET_SELECT_PATH, handleDesktopMarketSelectRequest],
       [DESKTOP_TERMINAL_OPEN_PATH, handleDesktopTerminalOpenRequest],
       [DESKTOP_RESTART_PATH, handleDesktopRestartRequest],
@@ -271,13 +326,16 @@ export function apply(ctx: Context, config: Config): void {
         () => ctx.webServer.register({
           kind: 'exact',
           path,
-          handler: (req, res) => handler(
-            req,
-            res,
-            rendererOrigin,
-            desktopSettings,
-            reportSettingsError,
-          ),
+          handler: (req, res) => {
+            if (rejectDesktopRequest(ctx, req, res)) return
+            return handler(
+              req,
+              res,
+              rendererOrigin,
+              desktopSettings,
+              reportSettingsError,
+            )
+          },
         }),
         `dsh-plugin-desktop: private settings route ${path}`,
       )
@@ -287,12 +345,15 @@ export function apply(ctx: Context, config: Config): void {
     () => ctx.webServer.register({
       kind: 'exact',
       path: RENDERER_BOOT_REPORT_PATH,
-      handler: (req, res) => handleRendererBootRequest(
-        req,
-        res,
-        rendererOrigin,
-        report => { runtime.reportRendererBoot(report) },
-      ),
+      handler: (req, res) => {
+        if (rejectDesktopRequest(ctx, req, res)) return
+        return handleRendererBootRequest(
+          req,
+          res,
+          rendererOrigin,
+          report => { runtime.reportRendererBoot(report) },
+        )
+      },
     }),
     'dsh-plugin-desktop: renderer boot report route',
   )
@@ -317,15 +378,18 @@ export function apply(ctx: Context, config: Config): void {
       () => ctx.webServer.register({
         kind: 'exact',
         path: DESKTOP_DIRECTORY_PICKER_PATH,
-        handler: (req, res) => handleDesktopDirectoryPickerRequest(
-          req,
-          res,
-          rendererOrigin,
-          () => runtime.pickDirectory(),
-          cause => {
-            ctx.logger.error(`dsh-plugin-desktop: native directory picker failed: ${cause instanceof Error ? cause.message : String(cause)}`)
-          },
-        ),
+        handler: (req, res) => {
+          if (rejectDesktopRequest(ctx, req, res)) return
+          return handleDesktopDirectoryPickerRequest(
+            req,
+            res,
+            rendererOrigin,
+            () => runtime.pickDirectory(),
+            cause => {
+              ctx.logger.error(`dsh-plugin-desktop: native directory picker failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+            },
+          )
+        },
       }),
       'dsh-plugin-desktop: native directory picker route',
     )
@@ -333,21 +397,42 @@ export function apply(ctx: Context, config: Config): void {
       () => ctx.webServer.register({
         kind: 'exact',
         path: DESKTOP_DIRECTORY_VALIDATOR_PATH,
-        handler: (req, res) => handleDesktopDirectoryValidationRequest(
-          req,
-          res,
-          rendererOrigin,
-          path => runtime.validateDirectory(path),
-          cause => {
-            ctx.logger.error(`dsh-plugin-desktop: workspace directory validation failed: ${cause instanceof Error ? cause.message : String(cause)}`)
-          },
-        ),
+        handler: (req, res) => {
+          if (rejectDesktopRequest(ctx, req, res)) return
+          return handleDesktopDirectoryValidationRequest(
+            req,
+            res,
+            rendererOrigin,
+            path => runtime.validateDirectory(path),
+            cause => {
+              ctx.logger.error(`dsh-plugin-desktop: workspace directory validation failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+            },
+          )
+        },
       }),
       'dsh-plugin-desktop: workspace directory validation route',
     )
   }
   ctx.effect(() => {
     let pending: ReturnType<typeof setImmediate> | undefined
+    const updateLiveWebAccess = (
+      browserEnabled: boolean,
+      exposure: DesktopNetworkExposure,
+    ): void => {
+      browserAccess.setOrdinaryBrowserEnabled(browserEnabled)
+      void lanHttps.setEnabled(browserEnabled && exposure === 'lan').then((snapshot) => {
+        if (snapshot.state === 'failed') {
+          ctx.logger.error(
+            `dsh-plugin-desktop: LAN HTTPS edge failed to start (${snapshot.errorCode ?? 'unknown'})`,
+          )
+        }
+      }).catch((cause: unknown) => {
+        ctx.logger.error(
+          `dsh-plugin-desktop: LAN HTTPS edge transition failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+        )
+      })
+    }
+    updateLiveWebAccess(browserAccess.ordinaryBrowserEnabled, config.networkExposure)
     const stopWatching = settings.watch((next) => {
       const nextBrowserAccess = desktopBrowserAccessEnabled(
         next.mode,
@@ -358,10 +443,9 @@ export function apply(ctx: Context, config: Config): void {
         nextBrowserAccess,
         next.networkExposure,
       )
+      updateLiveWebAccess(nextBrowserAccess, nextNetworkExposure)
       if (next.mode === config.mode
         && next.port === config.port
-        && nextNetworkExposure === config.networkExposure
-        && nextBrowserAccess === browserAccess.ordinaryBrowserEnabled
         && next.macosMaterial === config.macosMaterial
         && next.windowsMaterial === config.windowsMaterial) {
         if (pending !== undefined) clearImmediate(pending)
@@ -379,8 +463,9 @@ export function apply(ctx: Context, config: Config): void {
     return () => {
       stopWatching()
       if (pending !== undefined) clearImmediate(pending)
+      void lanHttps.stop()
     }
-  }, 'dsh-plugin-desktop: restart after startup setting change')
+  }, 'dsh-plugin-desktop: live browser access and restart-applied native settings')
   if (runtime.platform !== 'linux') {
     ctx.on('settings/updated', (namespace, next) => {
       if (namespace !== UI_THEME_SETTINGS_NAMESPACE) return
@@ -389,7 +474,7 @@ export function apply(ctx: Context, config: Config): void {
   }
   ctx.on('settings/updated', (namespace, next) => {
     if (namespace !== UI_LOCALE_SETTINGS_NAMESPACE) return
-    runtime.setLocalePreference((next as LocaleSettings).preference)
+    runtime.setLocalePreference(desktopLocalePreference((next as LocaleSettings).preference))
   })
   ctx.effect(
     () => {
@@ -400,25 +485,29 @@ export function apply(ctx: Context, config: Config): void {
         config.windowsMaterial,
         runtime.windowsBuild,
       )
+      const url = desktopRendererUrl(
+        ctx.webServer.port,
+        config.mode,
+        runtime.platform,
+        runtime.updates.currentVersion,
+        material,
+        runtime.windowsBuild,
+      )
       return runtime.schedule({
         ...config,
         material,
         ...(runtime.windowsBuild === undefined ? {} : { windowsBuild: runtime.windowsBuild }),
-        url: desktopRendererUrl(
-          ctx.webServer.port,
-          config.mode,
-          runtime.platform,
-          runtime.updates.currentVersion,
-          material,
-          runtime.windowsBuild,
-        ),
+        url,
+        authenticationUrl: ctx.connection.authenticatedUrl(new URL(url).origin),
         rendererAccessHeader: browserAccess.rendererHeader,
         productName: 'DSH Desktop',
         windowTitle: 'DeepSeek Harness Desktop',
         iconPath,
         trayIcons,
         readLocalePreference: () => {
-          return (ctx.settings.get(UI_LOCALE_SETTINGS_NAMESPACE) as LocaleSettings | undefined)?.preference
+          return desktopLocalePreference(
+            (ctx.settings.get(UI_LOCALE_SETTINGS_NAMESPACE) as LocaleSettings | undefined)?.preference,
+          )
         },
         readThemeSource: () => {
           const theme = ctx.settings.get(UI_THEME_SETTINGS_NAMESPACE) as ThemeSettings | undefined

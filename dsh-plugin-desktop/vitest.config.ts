@@ -4,12 +4,18 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.spec.ts'],
+    globalSetup: process.platform === 'win32' ? ['../scripts/prepare-test-electron.mjs'] : [],
     // Client component specs import ui-primitives, whose markdown surface
     // imports katex styles; inline the package so Vite transforms those CSS
     // imports instead of Node loading them natively.
+    // This patched host package is exercised with a mocked node:fs/promises.
+    // Keep it in Vitest's module graph so the builtin mock reaches its imports.
     server: {
       deps: {
-        inline: ['@deepseek-ai/dsh-client-ui-primitives'],
+        inline: [
+          '@deepseek-ai/dsh-client-ui-primitives',
+          '@deepseek-ai/dsh-host-directory-picker-browse',
+        ],
       },
     },
     // Profile integration tests create a full package-junction closure; higher

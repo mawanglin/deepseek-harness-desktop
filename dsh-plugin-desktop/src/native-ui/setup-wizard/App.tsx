@@ -47,6 +47,7 @@ export type DesktopSetupWizardStep =
   | 'welcome'
   | 'mode'
   | 'material'
+  | 'aa'
   | 'market'
   | 'notifications'
   | 'browser'
@@ -57,6 +58,7 @@ export const DESKTOP_SETUP_WIZARD_STEPS = Object.freeze([
   'mode',
   'material',
   'market',
+  'aa',
   'notifications',
   'browser',
   'success',
@@ -125,11 +127,12 @@ function normalizedSelection(input: DesktopSetupWizardInput): DesktopSetupWizard
     mode,
     macosMaterial: input.macosMaterial,
     windowsMaterial: input.platform === 'win32' && input.windowsMaterial === 'mica' && !input.micaSupported
-      ? 'acrylic'
+      ? 'off'
       : input.windowsMaterial,
     openBrowser: browserAccess,
     networkExposure: browserAccess ? input.networkExposure : 'loopback',
     market: input.market,
+    aaEnabled: input.aaEnabled === true,
     notifications: { ...input.notifications },
   }
 }
@@ -143,6 +146,7 @@ function finish(selection: DesktopSetupWizardSelection): void {
   url.searchParams.set('openBrowser', String(browserAccess))
   url.searchParams.set('networkExposure', browserAccess ? selection.networkExposure : 'loopback')
   url.searchParams.set('market', selection.market)
+  url.searchParams.set('aaEnabled', String(selection.aaEnabled === true))
   url.searchParams.set('notificationsEnabled', String(selection.notifications.enabled))
   url.searchParams.set('notifyOnTurnCompletion', String(selection.notifications.notifyOnTurnCompletion))
   url.searchParams.set('notifyOnTurnFailure', String(selection.notifications.notifyOnTurnFailure))
@@ -297,7 +301,6 @@ function MaterialOptions({
     { value: 'transparent', title: copy.materialTransparent, body: copy.materialTransparentBody },
   ] : input.platform === 'win32' ? [
     { value: 'off', title: copy.materialOff, body: copy.materialOffBody },
-    { value: 'acrylic', title: copy.materialAcrylic, body: copy.materialAcrylicBody },
     ...(input.micaSupported ? [{ value: 'mica' as const, title: copy.materialMica, body: copy.materialMicaBody }] : []),
   ] : [
     { value: 'off', title: copy.materialOff, body: copy.unavailableOnLinux },
@@ -307,7 +310,7 @@ function MaterialOptions({
   const choose = (value: MaterialOption['value']): void => {
     if (input.platform === 'darwin' && (value === 'off' || value === 'transparent')) {
       update({ ...selection, macosMaterial: value })
-    } else if (input.platform === 'win32' && (value === 'off' || value === 'acrylic' || value === 'mica')) {
+    } else if (input.platform === 'win32' && (value === 'off' || value === 'mica')) {
       update({ ...selection, windowsMaterial: value })
     }
   }
@@ -316,7 +319,7 @@ function MaterialOptions({
     aria-orientation="vertical"
     name="setup-window-material"
     onValueChange={value => {
-      if (value === 'off' || value === 'transparent' || value === 'acrylic' || value === 'mica') choose(value)
+      if (value === 'off' || value === 'transparent' || value === 'mica') choose(value)
     }}
     value={selected}
   >{options.map(option => <Choice
@@ -447,6 +450,20 @@ export function SetupWizardStepPage({
 }): JSX.Element {
   if (step === 'mode') return <Page step={step} subtitle={copy.presentationBody} title={copy.presentationTitle}><ModeOptions copy={copy} input={input} selection={selection} update={update} /></Page>
   if (step === 'material') return <Page step={step} subtitle={copy.windowMaterialBody} title={copy.windowMaterial}><MaterialOptions copy={copy} input={input} selection={selection} update={update} /></Page>
+  if (step === 'aa') return <Page step={step} subtitle={copy.aaIntro} title={copy.aaTitle}>
+    <RadioGroup aria-label={copy.aaTitle} name="setup-aa" value={String(selection.aaEnabled === true)}
+      onValueChange={value => { if (value === 'true' || value === 'false') update({ ...selection, aaEnabled: value === 'true' }) }}>
+      {[false, true].map(enabled => <Choice key={String(enabled)} id={`setup-aa-${String(enabled)}`}
+        value={String(enabled)} selected={(selection.aaEnabled === true) === enabled}
+        title={enabled ? copy.aaEnabled : copy.aaDisabled} body={enabled ? copy.aaEnabledBody : copy.aaDisabledBody}
+        {...(enabled ? { badge: copy.beta } : {})} />)}
+    </RadioGroup>
+    {selection.aaEnabled === true && <aside className="mt-4 space-y-2 rounded-xl border bg-muted/30 p-4" role="status">
+      <h2 className="text-sm font-semibold">{copy.aaNextTitle}</h2>
+      <p className="text-sm leading-relaxed text-muted-foreground">{copy.aaNextBody}</p>
+      <p className="text-xs leading-relaxed text-muted-foreground">{copy.aaNextDesktop}</p>
+    </aside>}
+  </Page>
   if (step === 'market') return <Page step={step} subtitle={copy.marketBody} title={copy.marketTitle}><MarketOptions copy={copy} selection={selection} update={update} /></Page>
   if (step === 'notifications') return <Page step={step} subtitle={copy.notificationsBody} title={copy.notificationsTitle}><NotificationOptions copy={copy} notifications={selection.notifications} update={notifications => { update({ ...selection, notifications }) }} /></Page>
   if (step === 'browser') return <Page step={step} subtitle={copy.browserBody} title={copy.browserTitle}><BrowserOptions copy={copy} requestBrowserAccess={requestBrowserAccess} requestExposure={requestExposure} selection={selection} /></Page>
