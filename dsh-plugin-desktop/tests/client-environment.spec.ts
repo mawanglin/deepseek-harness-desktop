@@ -302,7 +302,7 @@ describe('advanced desktop layout', () => {
     expect(desktopWindowService({
       version: '2.0.6', mode: 'advanced', platform: 'win32', material: 'off', micaSupported: false,
     })).toEqual({
-      version: '2.0.3-2',
+      version: '2.0.6',
       mode: 'advanced',
       platform: 'win32',
       material: 'off',

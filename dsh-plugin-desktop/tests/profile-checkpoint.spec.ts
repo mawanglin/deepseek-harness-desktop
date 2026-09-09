@@ -235,7 +235,7 @@ appVersion: '2.0.6',
         recordedAt: '2026-08-25T00:00:01.000Z',
         desktopPackageName: 'dsh-plugin-desktop',
         releaseChannel: 'stable',
-        desktopVersion: '2.0.3',
+        desktopVersion: '2.0.6',
         dshVersion: '0.1.1-rc.2',
       },
     })
@@ -269,7 +269,7 @@ appVersion: '2.0.6',
       evidence: {
         desktopPackageName: 'dsh-plugin-desktop-beta',
         releaseChannel: 'beta',
-        desktopVersion: '2.0.3',
+        desktopVersion: '2.0.6',
       },
     })
 
@@ -286,7 +286,7 @@ appVersion: '2.0.6',
       legacyReleaseChannel: 'beta',
     })).toMatchObject({
       status: 'valid',
-      evidence: { releaseChannel: 'beta', desktopVersion: '2.0.3' },
+      evidence: { releaseChannel: 'beta', desktopVersion: '2.0.6' },
     })
 
     writeFileSync(manifestPath, '{broken')
