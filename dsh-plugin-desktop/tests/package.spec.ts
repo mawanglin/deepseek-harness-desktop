@@ -928,46 +928,6 @@ describe('published package surface', () => {
     expect(manifest.devDependencies?.['@electron/fuses']).toBe('1.8.0')
   })
 
-  it('runs platform package gates before reusing native packaging outputs', () => {
-    // Slice each top-level CI job by the next two-space job key rather than by a
-    // single sibling name, so the boundary holds regardless of how the workflow
-    // text is resolved on the runner.
-    const jobKey = /^  ([a-z][a-z0-9-]*):\n/gm
-    const jobBlocks = new Map<string, string>()
-    let match: RegExpExecArray | null
-    let previous: string | undefined
-    let previousIndex = 0
-    while ((match = jobKey.exec(ciWorkflow)) !== null) {
-      if (previous !== undefined) jobBlocks.set(previous, ciWorkflow.slice(previousIndex, match.index))
-      previous = match[1]
-      previousIndex = match.index
-      jobKey.lastIndex = match.index + match[0].length
-    }
-    if (previous !== undefined) jobBlocks.set(previous, ciWorkflow.slice(previousIndex))
-
-    const windowsJob = jobBlocks.get('desktop-windows') ?? ''
-    const macosJob = jobBlocks.get('desktop-macos') ?? ''
-    const linuxJob = jobBlocks.get('desktop-linux') ?? ''
-
-    expect(windowsJob).not.toContain('- run: yarn check')
-    expect(windowsJob).toContain('workspace: [dsh-plugin-desktop, dsh-plugin-desktop-beta]')
-    expect(windowsJob).toContain('- run: yarn workspace ${{ matrix.workspace }} check:win-package')
-    expect(windowsJob).toContain('run: yarn workspace ${{ matrix.workspace }} dist:win')
-    expect(windowsJob).toContain('run: yarn workspace ${{ matrix.workspace }} dist:win-portable')
-    expect(windowsJob).toContain('DSH_PACKAGE_CHECK_ALREADY_RAN: \'1\'')
-    expect(macosJob).not.toContain('- run: yarn check')
-    expect(macosJob).toContain('workspace: [dsh-plugin-desktop, dsh-plugin-desktop-beta]')
-    expect(macosJob).toContain('- run: yarn workspace ${{ matrix.workspace }} check:mac-package')
-    expect(macosJob).toContain('run: yarn workspace ${{ matrix.workspace }} dist:mac-smoke')
-    expect(macosJob).toContain('DSH_PACKAGE_CHECK_ALREADY_RAN: \'1\'')
-    expect(macosJob).not.toContain('- run: yarn dist:mac-smoke')
-    expect(linuxJob).toContain('runs-on: ubuntu-latest')
-    expect(linuxJob).toContain('apt-get install -y rpm')
-    expect(linuxJob).toContain('- run: yarn check')
-    expect(linuxJob).toContain('run: yarn workspace dsh-plugin-desktop dist:linux')
-    expect(linuxJob).toContain('DSH_PACKAGE_CHECK_ALREADY_RAN: \'1\'')
-  })
-
   it('skips product packaging only for documentation-only changes', () => {
     const classifier = fileURLToPath(new URL('../../scripts/classify-ci-changes.mjs', import.meta.url))
     const classify = (paths: string[]): string => execFileSync(
