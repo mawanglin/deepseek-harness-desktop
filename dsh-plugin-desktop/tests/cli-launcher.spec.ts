@@ -2,7 +2,7 @@ import { createRequire } from 'node:module'
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 
 // ui-primitives bundles markdown surfaces that import katex styles and its
 // Tooltip uses client-only effects; stub the two primitives this component
