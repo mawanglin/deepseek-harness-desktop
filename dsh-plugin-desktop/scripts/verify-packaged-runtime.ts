@@ -91,6 +91,7 @@ export const ALLOWED_SMART_UNPACK_PACKAGE_PREFIXES = [
   'node_modules/@koromix/koffi-',
   'node_modules/@vscode/ripgrep-',
   'node_modules/node-addon-require-builtin-',
+  'node_modules/@deepseek-ai/node-addon-landlock-run-',
 ] as const
 
 /** Every generated JavaScript file shipped by the installed DSH CLI package. */
