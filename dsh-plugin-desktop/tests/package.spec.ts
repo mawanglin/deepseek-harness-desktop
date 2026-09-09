@@ -929,18 +929,25 @@ describe('published package surface', () => {
   })
 
   it('runs platform package gates before reusing native packaging outputs', () => {
-    const windowsJob = ciWorkflow.slice(
-      ciWorkflow.indexOf('  desktop-windows:'),
-      ciWorkflow.indexOf('  desktop-macos:'),
-    )
-    const macosJob = ciWorkflow.slice(
-      ciWorkflow.indexOf('  desktop-macos:'),
-      ciWorkflow.indexOf('  desktop-linux:'),
-    )
-    const linuxJob = ciWorkflow.slice(
-      ciWorkflow.indexOf('  desktop-linux:'),
-      ciWorkflow.indexOf('  upstream-command-windows:'),
-    )
+    // Slice each top-level CI job by the next two-space job key rather than by a
+    // single sibling name, so the boundary holds regardless of how the workflow
+    // text is resolved on the runner.
+    const jobKey = /^  ([a-z][a-z0-9-]*):\n/gm
+    const jobBlocks = new Map<string, string>()
+    let match: RegExpExecArray | null
+    let previous: string | undefined
+    let previousIndex = 0
+    while ((match = jobKey.exec(ciWorkflow)) !== null) {
+      if (previous !== undefined) jobBlocks.set(previous, ciWorkflow.slice(previousIndex, match.index))
+      previous = match[1]
+      previousIndex = match.index
+      jobKey.lastIndex = match.index + match[0].length
+    }
+    if (previous !== undefined) jobBlocks.set(previous, ciWorkflow.slice(previousIndex))
+
+    const windowsJob = jobBlocks.get('desktop-windows') ?? ''
+    const macosJob = jobBlocks.get('desktop-macos') ?? ''
+    const linuxJob = jobBlocks.get('desktop-linux') ?? ''
 
     expect(windowsJob).not.toContain('- run: yarn check')
     expect(windowsJob).toContain('workspace: [dsh-plugin-desktop, dsh-plugin-desktop-beta]')
