@@ -50,6 +50,15 @@ const allowedDifferences = new Set([
   'startup-recovery-window.ts',
   'updates.ts',
   'webserver.ts',
+  // Stable Desktop-only features (Chinese menu, sidebar CLI launcher, recovery
+  // uninstall, Linux terminal) do not mirror into the beta variant.
+  'application-menu.ts',
+  'client/cli-launcher-styles.ts',
+  'client/cli-launcher.tsx',
+  'desktop-cli-launcher-contract.ts',
+  'desktop-cli-launcher-route.ts',
+  'recovery-plugin-uninstall.ts',
+  'terminal.ts',
 ])
 
 function files(directory, base = directory) {
