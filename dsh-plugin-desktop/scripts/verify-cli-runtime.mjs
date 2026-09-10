@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electronPath from 'electron'
 import { installDesktopPnpmRuntime } from '../lib/desktop-runtime-environment.js'
@@ -119,13 +119,20 @@ function verifyLifecycleEnvironment(stateRoot, installation, env) {
   const result = runPnpm(env, ['install', '--offline', '--reporter=silent'], project)
   verifyResult('pnpm lifecycle smoke', result, '')
   const actual = JSON.parse(readFileSync(resultPath, 'utf8'))
+  // Windows keeps ELECTRON_RUN_AS_NODE for the Electron Node shim (see
+  // desktop-runtime-environment) and derives the shim from %~dp0.., so its
+  // node path carries a literal bin\.. segment that resolve() folds.
   const expected = {
-    runAsNode: [],
-    node: installation.nodeShimPath,
-    npmNodeExecPath: installation.nodeShimPath,
+    runAsNode: process.platform === 'win32' ? ['ELECTRON_RUN_AS_NODE'] : [],
+    node: resolve(installation.nodeShimPath),
+    npmNodeExecPath: resolve(installation.nodeShimPath),
     runtime: 'electron',
     target: electronVersion,
     disturl: 'https://electronjs.org/headers',
+  }
+  if (process.platform === 'win32') {
+    actual.node = resolve(actual.node)
+    actual.npmNodeExecPath = resolve(actual.npmNodeExecPath)
   }
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(`pnpm lifecycle smoke returned ${JSON.stringify(actual)} instead of ${JSON.stringify(expected)}`)
