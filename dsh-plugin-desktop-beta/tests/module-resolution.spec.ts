@@ -3,6 +3,10 @@ import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+function platformUrl(...segments: string[]): string {
+  return pathToFileURL(join(tmpdir(), ...segments)).href
+}
+
 const harness = vi.hoisted(() => {
   const realpathNative = vi.fn((candidate: string) => candidate)
   const realpathSync = Object.assign(
@@ -112,7 +116,7 @@ describe('installProfilePackageResolver', () => {
   })
 
   it.each(['node:fs', 'fs', 'node:path', 'path'])('passes builtin %s through without inspecting the parent filesystem', specifier => {
-    installProfilePackageResolver('file:///profiles/desktop/package.json')
+    installProfilePackageResolver(platformUrl('profiles', 'desktop', 'package.json'))
     harness.realpathNative.mockClear()
     const parent = join(tmpdir(), 'untracked-plugin', 'index.js')
     const context = { parentURL: pathToFileURL(parent).href }
@@ -206,13 +210,13 @@ describe('installProfilePackageResolver', () => {
   })
 
   it('recognizes the clean-boot Profile directory URL as a Loader boundary', () => {
-    const profileBaseUrl = 'file:///tmp/dsh/profiles/desktop/package.json'
+    const profileBaseUrl = platformUrl('dsh', 'profiles', 'desktop', 'package.json')
     installProfilePackageResolver(profileBaseUrl)
     const nextResolve = vi.fn((specifier: string, context: { parentURL?: string }) => ({ specifier, context }))
 
     expect(harness.resolve?.(
       '@deepseek-ai/dsh-web-app',
-      { parentURL: 'file:///tmp/dsh/profiles/desktop/' },
+      { parentURL: platformUrl('dsh', 'profiles', 'desktop') },
       nextResolve,
     )).toEqual({
       specifier: '@deepseek-ai/dsh-web-app',
@@ -401,9 +405,9 @@ describe('installProfilePackageResolver', () => {
   })
 
   it('allows linked Profile modules to resolve dependencies from shared Profile node_modules', () => {
-    const profileBaseUrl = 'file:///tmp/dsh/profiles/desktop/package.json'
-    const linkedPluginUrl = 'file:///tmp/dsh/linked-plugins/plugin/index.js'
-    const sharedDependencyUrl = 'file:///tmp/dsh/profiles/node_modules/profile-peer/index.js'
+    const profileBaseUrl = platformUrl('dsh', 'profiles', 'desktop', 'package.json')
+    const linkedPluginUrl = platformUrl('dsh', 'linked-plugins', 'plugin', 'index.js')
+    const sharedDependencyUrl = platformUrl('dsh', 'profiles', 'node_modules', 'profile-peer', 'index.js')
     installProfilePackageResolver(profileBaseUrl)
     const nextResolve = vi.fn((specifier: string, context: { parentURL?: string }) => {
       if (specifier === 'plugin' && context.parentURL === profileBaseUrl) return { url: linkedPluginUrl }
@@ -442,8 +446,8 @@ describe('installProfilePackageResolver', () => {
   })
 
   it('falls back to the Desktop installation after CommonJS-style misses', () => {
-    const profileBaseUrl = 'file:///tmp/dsh/profiles/desktop/package.json'
-    const pluginUrl = 'file:///tmp/dsh/profiles/desktop/node_modules/plugin/index.cjs'
+    const profileBaseUrl = platformUrl('dsh', 'profiles', 'desktop', 'package.json')
+    const pluginUrl = platformUrl('dsh', 'profiles', 'desktop', 'node_modules', 'plugin', 'index.cjs')
     const desktopDependencyUrl = 'file:///Applications/DSH.app/Contents/Resources/app.asar/node_modules/dependency/index.cjs'
     installProfilePackageResolver(profileBaseUrl)
     const nextResolve = vi.fn((specifier: string, context: { parentURL?: string }) => {
@@ -460,9 +464,9 @@ describe('installProfilePackageResolver', () => {
   })
 
   it('bypasses an obsolete shared Profile proxy before using the Desktop package', () => {
-    const profileBaseUrl = 'file:///tmp/dsh/profiles/desktop/package.json'
-    const pluginUrl = 'file:///tmp/dsh/profiles/desktop/node_modules/plugin/index.cjs'
-    const staleUrl = 'file:///tmp/dsh/profiles/node_modules/@deepseek-ai/schemastery/index.js'
+    const profileBaseUrl = platformUrl('dsh', 'profiles', 'desktop', 'package.json')
+    const pluginUrl = platformUrl('dsh', 'profiles', 'desktop', 'node_modules', 'plugin', 'index.cjs')
+    const staleUrl = platformUrl('dsh', 'profiles', 'node_modules', '@deepseek-ai', 'schemastery', 'index.js')
     const desktopUrl = 'file:///Applications/DSH.app/Contents/Resources/app.asar/node_modules/@deepseek-ai/schemastery/lib/index.cjs'
     installProfilePackageResolver(profileBaseUrl)
     const nextResolve = vi.fn((specifier: string, context: { parentURL?: string }) => {
@@ -573,7 +577,7 @@ describe('installProfilePackageResolver', () => {
   })
 
   it('migrates a live v1 resolver state in place during HMR', () => {
-    const profileBaseUrl = 'file:///tmp/dsh/profiles/hmr/package.json'
+    const profileBaseUrl = platformUrl('dsh', 'profiles', 'hmr', 'package.json')
     installProfilePackageResolver(profileBaseUrl)
     const symbol = Symbol.for('dsh-plugin-desktop.profile-package-resolver.v1')
     const state = (globalThis as unknown as Record<PropertyKey, unknown>)[symbol] as {
@@ -605,8 +609,8 @@ describe('installProfilePackageResolver', () => {
   })
 
   it('multiplexes Profiles through one hook and tolerates out-of-order release', () => {
-    const first = installProfilePackageResolver('file:///tmp/dsh/profiles/first/package.json')
-    const second = installProfilePackageResolver('file:///tmp/dsh/profiles/second/package.json')
+    const first = installProfilePackageResolver(platformUrl('dsh', 'profiles', 'first', 'package.json'))
+    const second = installProfilePackageResolver(platformUrl('dsh', 'profiles', 'second', 'package.json'))
     expect(harness.registerHooks).toHaveBeenCalledTimes(1)
 
     first()
@@ -614,11 +618,11 @@ describe('installProfilePackageResolver', () => {
     const nextResolve = vi.fn((specifier: string, context: { parentURL?: string }) => ({ specifier, context }))
     expect(harness.resolve?.(
       'second-plugin',
-      { parentURL: 'file:///tmp/dsh/profiles/second/' },
+      { parentURL: platformUrl('dsh', 'profiles', 'second') },
       nextResolve,
     )).toEqual({
       specifier: 'second-plugin',
-      context: { parentURL: 'file:///tmp/dsh/profiles/second/package.json' },
+      context: { parentURL: platformUrl('dsh', 'profiles', 'second', 'package.json') },
     })
 
     second()
@@ -627,8 +631,8 @@ describe('installProfilePackageResolver', () => {
   })
 
   it('reference-counts duplicate Profile registrations', () => {
-    const first = installProfilePackageResolver('file:///tmp/dsh/profiles/desktop/package.json')
-    const second = installProfilePackageResolver('file:///tmp/dsh/profiles/desktop/package.json')
+    const first = installProfilePackageResolver(platformUrl('dsh', 'profiles', 'desktop', 'package.json'))
+    const second = installProfilePackageResolver(platformUrl('dsh', 'profiles', 'desktop', 'package.json'))
     expect(harness.registerHooks).toHaveBeenCalledTimes(1)
     second()
     expect(harness.deregister).not.toHaveBeenCalled()
@@ -637,8 +641,8 @@ describe('installProfilePackageResolver', () => {
   })
 
   it('restores the correct newest Profile after an A-B-A retain is released', () => {
-    const firstProfile = 'file:///tmp/dsh/profiles/first/package.json'
-    const secondProfile = 'file:///tmp/dsh/profiles/second/package.json'
+    const firstProfile = platformUrl('dsh', 'profiles', 'first', 'package.json')
+    const secondProfile = platformUrl('dsh', 'profiles', 'second', 'package.json')
     const first = installProfilePackageResolver(firstProfile)
     const second = installProfilePackageResolver(secondProfile)
     const newestFirst = installProfilePackageResolver(firstProfile)
@@ -662,9 +666,9 @@ describe('installProfilePackageResolver', () => {
   it('requires a plain package.json file URL anchor', () => {
     expect(() => installProfilePackageResolver('https://example.com/package.json'))
       .toThrow('plain file URL')
-    expect(() => installProfilePackageResolver('file:///tmp/profile/cordis.yml'))
+    expect(() => installProfilePackageResolver(platformUrl('profile', 'cordis.yml')))
       .toThrow('package.json anchor')
-    expect(() => installProfilePackageResolver('file:///tmp/profile/package.json?generation=1'))
+    expect(() => installProfilePackageResolver(platformUrl('profile', 'package.json') + '?generation=1'))
       .toThrow('plain file URL')
   })
 })

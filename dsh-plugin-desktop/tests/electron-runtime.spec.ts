@@ -412,7 +412,7 @@ describe('Electron desktop runtime', () => {
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 16, y: 12 },
       webPreferences: {
-        preload: expect.stringMatching(/\/preload\.cjs$/),
+        preload: expect.stringMatching(/[\\/]preload\.cjs$/),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,

@@ -161,11 +161,12 @@ describe('final Electron fuse verification', () => {
 
   it('fails when one requested architecture is missing even if a sibling exists', () => {
     const x64Executable = join('/build', 'win-unpacked', 'DSH Desktop Beta.exe')
+    const armoredMissing = join('/build', 'win-arm64-unpacked', 'DSH Desktop Beta.exe')
 
     expect(() => resolveFinalPackagedRuntimeContexts(
       result([{ key: 'win', archs: [Arch.x64, Arch.arm64] }]),
       filename => filename === x64Executable,
-    )).toThrow('win/arm64 at /build/win-arm64-unpacked/DSH Desktop Beta.exe')
+    )).toThrow(`win/arm64 at ${armoredMissing}`)
   })
 
   it('resolves a real target-name map through the target archs retained by NSIS', () => {
@@ -263,8 +264,9 @@ describe('final Electron fuse verification', () => {
 
   it('wraps an unreadable final executable with its resolved path', async () => {
     const read: ElectronFuseReader = async () => { throw new Error('missing sentinel') }
+    const executable = join('/build', 'DSH Desktop Beta.exe')
 
-    await expect(verifyElectronExecutableFuses('/build/DSH Desktop Beta.exe', read))
-      .rejects.toThrow('/build/DSH Desktop Beta.exe')
+    await expect(verifyElectronExecutableFuses(executable, read))
+      .rejects.toThrow(executable)
   })
 })
