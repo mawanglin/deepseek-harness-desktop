@@ -1,5 +1,6 @@
 /** Headless smoke for the complete published DSH Web profile and renderer manifest. */
 
+import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -330,6 +331,8 @@ try {
   const aaEnabled = aaRequested && !brokenAa
   if (ids.has('@agents-anywhere/dsh-bridge-next') !== aaEnabled) throw new Error('AA client graph does not match explicit selection')
   if (aaEnabled && (!ctx.get('agentsAnywhereRuntime') || !ctx.get('agentsAnywhereOnboarding'))) {
+    const uvCheck = execFileSync(process.platform === 'win32' ? 'where' : 'which', ['uv'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+    process.stderr.write(`verify-profile-boot AA debug: uv=${JSON.stringify(uvCheck)} home=${home}\n`)
     throw new Error('AA Host services did not activate in the actual Desktop profile')
   }
   if (aaEnabled) {
