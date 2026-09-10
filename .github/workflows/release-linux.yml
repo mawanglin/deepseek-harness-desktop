@@ -29,13 +29,6 @@ jobs:
           submodules: recursive
       - name: Force the working tree to the triggered ref
         run: git -C "$GITHUB_WORKSPACE" reset --hard "${{ github.ref_name }}"
-      - name: Debug dump ci.yml layout as the runner sees it
-        run: |
-          echo "== HEAD ==" && git -C "$GITHUB_WORKSPACE" log --oneline -1
-          echo "== ci.yml git blob hash ==" && git -C "$GITHUB_WORKSPACE" hash-object .github/workflows/ci.yml
-          echo "== job keys (cat -A) ==" && grep -nE '^  (desktop-windows|desktop-macos|desktop-linux|upstream-command-windows):' .github/workflows/ci.yml | cat -A
-          echo "== node macos slice ==" && node -e "const c=require('node:fs').readFileSync('.github/workflows/ci.yml','utf8'); const im=c.indexOf('  desktop-macos:'); const il=c.indexOf('  desktop-linux:'); console.log('idx',im,il,'contains yarn check:', c.slice(im,il).includes('- run: yarn check'))"
-          echo "== gates test count in package.spec.ts ==" && grep -c 'runs platform package gates' dsh-plugin-desktop/tests/package.spec.ts || true
       - uses: actions/setup-node@v6
         with:
           node-version: 22.23.2
