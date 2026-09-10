@@ -83,6 +83,12 @@ export function recoveryPluginEnvironment(
   environment.PATH = [options.nodeBinDir, options.pnpmBinDir, path]
     .filter(value => value.length > 0)
     .join(platform === 'win32' ? ';' : ':')
+  if (platform === 'win32') {
+    // `dsh plugin` resolves pnpm through cmd.exe; without ComSpec/SystemRoot the
+    // shell lookup itself fails with ENOENT even when pnpm is on the built PATH.
+    environment.ComSpec ??= process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe'
+    environment.SystemRoot ??= process.env.SystemRoot
+  }
   environment.NODE = options.nodeShimPath
   environment.ELECTRON_RUN_AS_NODE = '1'
   environment.DSH_HOME = options.homeDir

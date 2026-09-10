@@ -68,7 +68,7 @@ describe('isolated compatibility shell', () => {
   it('loads only the packaged chrome and reserves native bounds outside the content document', async () => {
     const { shell, window, webContents } = fixture()
     await shell.load()
-    expect(webContents.loadFile).toHaveBeenCalledWith(expect.stringMatching(/native-ui\/compatibility-chrome\.html$/))
+    expect(webContents.loadFile).toHaveBeenCalledWith(expect.stringMatching(/[\\/]native-ui[\\/]compatibility-chrome\.html$/))
     expect(window.contentView.addChildView).toHaveBeenCalledWith(shell.content)
     expect(shell.content).toMatchObject({ options: { webPreferences: {
       partition: 'persist:dsh-desktop-renderer', preload: '/desktop/preload.cjs',
