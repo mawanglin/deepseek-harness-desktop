@@ -37,3 +37,9 @@ Linux 打包沿用 Windows/macOS 已经确立的"CI smoke + 手动或 tag 触发
 ## 验证
 
 `package-linux.ts` 和 `verify-linux-packages.ts` 沿用现有的依赖注入测试模式（`package-win.spec.ts` 的风格）：单测针对注入的 `run`/`log` 边界和字节魔数校验逻辑，不需要真的调用 Electron Builder 构建。`desktop-linux` CI job 就是打包回归的 smoke 检查，与 `desktop-windows`/`desktop-macos` 对齐；真正的"可安装性"校验（用 `apt` 装 `.deb`、用 `dnf`/`rpm` 装 `.rpm`、或运行 AppImage）不在这次设计范围内，与现有 Windows/macOS job 同样不会启动打包后的应用程序。
+
+## 补充说明（2026-09-15）：无 ASAR 打包基础
+
+上游把 ASAR 在 Windows、macOS、Linux 上全部关闭（`build.asar: false`，不再有任何平台级 `asarUnpack`），打包运行时目录也从 `app.asar`/`app.asar.unpacked` 改成了普通的 `resources/app/` 目录（macOS 上是 `Contents/Resources/app/`）。一次 fork 同步合并在采纳这个上游改动时，顺带把这份 Linux 设计的 `build.linux` 接线（`target`、`artifactName`、`maintainer`、`icon`）以及 `dist:linux`/`check:linux-package` 两个 script 回退成了合并前就存在的 `["dir"]` 占位配置；随后在这个无 ASAR 的新基础之上把它们重新接了回去，设计本身没有变化。
+
+去掉 ASAR 带来两个后续影响：第一，这份设计的 Linux `asarUnpack` 列表里原本需要的 `node_modules/@img/sharp-libvips-linux-*/**` 一项（在提交 `ea96fa464f` 里单独加上，用于修复打包应用无法启动的问题）不再需要——既然根本不往 ASAR 归档里打包任何东西，`sharp-libvips` 就只是普通的未打包文件，不需要额外的解包规则，因此没有重新加回。第二，`build.linux`（以及 `mac`/`win`）现在显式带上 `"asar": false`，取代了旧的顶层 `{ "smartUnpack": true }` 写法；`verify-packaged-runtime.ts` 对 `resources/app` 的通用解析逻辑在这次补充说明之前就已经把 Linux 当作和 Windows 一样处理，所以这部分不需要改动。这份设计的其余部分——写死字面量 `x64` 的 `artifactName`、必需的 `maintainer` 字段、用字节头部而非挂载校验 AppImage、以及一次 `electron-builder --linux deb rpm AppImage` 调用产出全部三个格式——都保持不变。
