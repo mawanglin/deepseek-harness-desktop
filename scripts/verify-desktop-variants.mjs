@@ -6,7 +6,22 @@ const stableRoot = join(root, 'dsh-plugin-desktop', 'src')
 const betaRoot = join(root, 'dsh-plugin-desktop-beta', 'src')
 // Both editions share behavior. Only release identity and launcher wording differ.
 const betaOnlyPaths = new Set([])
-const allowedDifferences = new Set(['product-identity.ts'])
+const allowedDifferences = new Set([
+  'product-identity.ts',
+  // Fork-local stable-only features never ported to the Beta variant:
+  // Chinese application menu, sidebar DSH CLI launcher, and Linux native
+  // terminal support. Intentionally NOT mirrored into Beta.
+  'application-menu.ts',
+  'client/cli-launcher-styles.ts',
+  'client/cli-launcher.tsx',
+  'desktop-cli-launcher-contract.ts',
+  'desktop-cli-launcher-route.ts',
+  'desktop-terminal.ts',
+  'terminal.ts',
+  'client/index.ts',
+  'index.ts',
+  'main.ts',
+])
 const normalizeIdentity = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop').replaceAll('DSH Desktop Beta', 'DSH Desktop')
 
 function files(directory, base = directory) {
