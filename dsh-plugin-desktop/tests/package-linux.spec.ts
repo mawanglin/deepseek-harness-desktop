@@ -8,7 +8,7 @@ interface CommandCall {
   readonly env: NodeJS.ProcessEnv
 }
 
-function options(calls: CommandCall[], logs: string[] = []): LinuxPackageOptions {
+function options(calls: CommandCall[], logs: string[] = [], prepare: (() => void) | null = null): LinuxPackageOptions {
   return {
     env: {
       PATH: '/usr/bin',
@@ -20,6 +20,9 @@ function options(calls: CommandCall[], logs: string[] = []): LinuxPackageOptions
     workspaceRoot: '/repo',
     desktopRoot: '/repo/dsh-plugin-desktop',
     builderCli: '/repo/node_modules/electron-builder/cli.js',
+    prepareRuntime: () => {
+      if (prepare !== null) prepare()
+    },
     verifier: '/repo/dsh-plugin-desktop/scripts/verify-linux-packages.ts',
     nodeExecutable: '/usr/bin/node',
     run: (command, args, cwd, env) => {
@@ -33,9 +36,12 @@ describe('Linux x64 packaging', () => {
   it('checks, builds unsigned deb/rpm/AppImage targets, then verifies them', () => {
     const calls: CommandCall[] = []
     const logs: string[] = []
+    const events: string[] = []
+    const prepareRuntime = () => { events.push('prepare') }
 
-    packageLinuxArtifacts(options(calls, logs))
+    packageLinuxArtifacts(options(calls, logs, prepareRuntime))
 
+    expect(events).toEqual(['prepare'])
     expect(calls).toHaveLength(3)
     expect(calls[0]).toEqual({
       command: 'corepack',

@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { prepareFsExtForElectron } from './prepare-fs-ext.ts'
 
 /** Injectable native Linux packaging boundary used by focused tests. */
 export interface LinuxPackageOptions {
@@ -21,6 +22,8 @@ export interface LinuxPackageOptions {
   readonly desktopRoot: string
   /** Absolute electron-builder CLI module. */
   readonly builderCli: string
+  /** Prepare platform-specific native runtime dependencies before packaging. */
+  readonly prepareRuntime: () => void
   /** Absolute packaged-artifact verification script. */
   readonly verifier: string
   /** Node executable used to run package-local scripts. */
@@ -62,6 +65,9 @@ export function createLinuxPackageOptions(): LinuxPackageOptions {
     workspaceRoot,
     desktopRoot,
     builderCli: require.resolve('electron-builder/cli.js'),
+    prepareRuntime: () => {
+      prepareFsExtForElectron({ platform: 'linux', arch: 'x64', desktopRoot })
+    },
     verifier: fileURLToPath(new URL('./verify-linux-packages.ts', import.meta.url)),
     nodeExecutable: process.execPath,
     run,
@@ -106,6 +112,10 @@ export function packageLinuxArtifacts(
   } else {
     options.log('Skipping the Linux package preflight; the CI shared gate already passed.')
   }
+  // Compile the fs-ext Electron ABI binding into node_modules/fs-ext/prebuilds/
+  // on the native Linux host; verify-packaged-runtime requires the physical
+  // electron.abiNNN.node file inside resources/app after packaging.
+  options.prepareRuntime()
   options.run(
     options.nodeExecutable,
     [
