@@ -43,7 +43,10 @@ describe('desktop client environment', () => {
     } as unknown as ClientContext
     try {
       apply(ctx)
-      expect(inject.mock.calls.map(([name]) => name)).toEqual(['settings.section', 'settings.action'])
+      // compatibility mode injects the settings slots plus the sideless CLI
+      // launcher footer button (a stable-only fork feature injected for every
+      // mode); it must NOT receive any advanced-chrome-only frame slots.
+      expect(inject.mock.calls.map(([name]) => name)).toEqual(['settings.section', 'settings.action', 'sidebar.footer.action'])
       expect(effect.mock.calls.map(([, label]) => label)).not.toContain('desktop: independent compatibility frame styles')
     } finally {
       vi.unstubAllGlobals()
