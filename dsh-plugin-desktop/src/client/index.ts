@@ -93,13 +93,18 @@ export function apply(ctx: ClientContext): void {
     () => startRendererBootReporter(ctx.loader),
     'dsh-plugin-desktop: renderer boot health report',
   )
-installDesktopCliLauncher(ctx)
   if (environment.platform === 'win32') {
     ctx.effect(
       () => installDesktopDirectoryPickerBridge(),
       'dsh-plugin-desktop: native directory picker bridge',
     )
   }
-  if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)
-  if (environment.mode === 'extended') applyExtendedShell(ctx, environment, desktopSettings)
+  if (environment.mode === 'advanced') {
+    installDesktopCliLauncher(ctx)
+    applyAdvancedShell(ctx, environment)
+  }
+  if (environment.mode === 'extended') {
+    installDesktopCliLauncher(ctx)
+    applyExtendedShell(ctx, environment, desktopSettings)
+  }
 }
