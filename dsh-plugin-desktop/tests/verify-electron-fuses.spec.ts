@@ -92,6 +92,12 @@ describe('final Electron fuse verification', () => {
     ])
   })
 
+  it.each(['mac', 'win', 'linux'] as const)('propagates global directory packaging to final %s fuse checks', key => {
+    const configured = result([{ key, archs: [Arch.x64] }], { asar: false })
+    const contexts = resolveFinalPackagedRuntimeContexts(configured, () => true)
+    expect(contexts[0]?.packager.platformSpecificBuildOptions?.asar).toBe(false)
+  })
+
   it('honors Linux executableName and recovers a configured suffixless architecture', () => {
     const configured = result([{ key: 'linux', archs: [Arch.arm64] }], {
       productName: 'DSH Desktop',
@@ -161,12 +167,11 @@ describe('final Electron fuse verification', () => {
 
   it('fails when one requested architecture is missing even if a sibling exists', () => {
     const x64Executable = join('/build', 'win-unpacked', 'DSH Desktop.exe')
-    const armoredMissing = join('/build', 'win-arm64-unpacked', 'DSH Desktop.exe')
 
     expect(() => resolveFinalPackagedRuntimeContexts(
       result([{ key: 'win', archs: [Arch.x64, Arch.arm64] }]),
       filename => filename === x64Executable,
-    )).toThrow(`win/arm64 at ${armoredMissing}`)
+    )).toThrow(`win/arm64 at ${join('/build', 'win-arm64-unpacked', 'DSH Desktop.exe')}`)
   })
 
   it('resolves a real target-name map through the target archs retained by NSIS', () => {
@@ -262,11 +267,24 @@ describe('final Electron fuse verification', () => {
       .rejects.toThrow(`${name}=DISABLE`)
   })
 
+  it('requires both ASAR fuses disabled for directory packages', async () => {
+    const disabled = {
+      [FuseV1Options.OnlyLoadAppFromAsar]: FuseState.DISABLE,
+      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: FuseState.DISABLE,
+    }
+    await expect(verifyElectronExecutableFuses('/build/app', async () => fuseWire(disabled), false))
+      .resolves.toBeUndefined()
+    for (const option of [FuseV1Options.OnlyLoadAppFromAsar, FuseV1Options.EnableEmbeddedAsarIntegrityValidation]) {
+      await expect(verifyElectronExecutableFuses('/build/app', async () => fuseWire({
+        ...disabled, [option]: FuseState.ENABLE,
+      }), false)).rejects.toThrow('invalid required fuses')
+    }
+  })
+
   it('wraps an unreadable final executable with its resolved path', async () => {
     const read: ElectronFuseReader = async () => { throw new Error('missing sentinel') }
-    const executable = join('/build', 'DSH Desktop.exe')
 
-    await expect(verifyElectronExecutableFuses(executable, read))
-      .rejects.toThrow(executable)
+    await expect(verifyElectronExecutableFuses('/build/DSH Desktop.exe', read))
+      .rejects.toThrow('/build/DSH Desktop.exe')
   })
 })
